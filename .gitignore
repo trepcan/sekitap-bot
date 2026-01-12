@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Bot specific
+.env
+*.session
+*.session-journal
+kitap_onbellek.db
+log.txt
+bot.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store

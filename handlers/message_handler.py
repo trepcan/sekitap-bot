@@ -114,10 +114,10 @@ class MessageHandler:
         baslik = html.escape(bilgi.get("baslik") or "Bilinmiyor")
         yazar = html.escape(bilgi.get("yazar") or "Bilinmiyor")
         
-        # Açıklama (maksimum 600 karakter)
+        # Açıklama (maksimum 3000 karakter)
         aciklama_raw = bilgi.get("aciklama") or "Açıklama bulunamadı."
-        if len(aciklama_raw) > 600:
-            aciklama_raw = aciklama_raw[:597] + "..."
+        if len(aciklama_raw) > 3000:
+            aciklama_raw = aciklama_raw[:2997] + "..."
         ozet = html.escape(aciklama_raw)
         
         # Mesaj formatı
@@ -128,6 +128,10 @@ class MessageHandler:
         if bilgi.get("seri"):
             seri = html.escape(bilgi["seri"])
             metin += f"📚 <b>Seri:</b> {seri}\n"
+            
+        if bilgi.get("orijinal_ad"): metin += f"🔤 <b>Orijinal Adı:</b> {html.escape(bilgi['orijinal_ad'])}\n"       
+        if bilgi.get("cevirmen"): metin += f"🗣 <b>Çevirmen:</b> {html.escape(bilgi['cevirmen'])}\n"
+
         
         # Dosya bilgileri
         metin += f"📂 <b>Tür:</b> {dosya_turu}\n"
@@ -144,7 +148,7 @@ class MessageHandler:
         
         if bilgi.get("sayfa"):
             metin += f"📄 <b>Sayfa:</b> {bilgi['sayfa']}\n"
-        
+        if bilgi.get("isbn"): metin += f"🔢 <b>ISBN:</b> {html.escape(bilgi['isbn'])}\n"
         # Puan
         if bilgi.get("puan"):
             puan = bilgi["puan"]
@@ -168,10 +172,7 @@ class MessageHandler:
         else:
             metin += f"\n🔍 <i>Kaynak: {kaynak}</i>"
         
-        # ISBN
-        if bilgi.get("isbn"):
-            isbn = html.escape(bilgi["isbn"])
-            metin += f" • ISBN: {isbn}"
+
         
         # Mesajı düzenle
         try:

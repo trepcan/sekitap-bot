@@ -71,7 +71,7 @@ class BookService:
 
 
     async def _search_kitapyurdu(self, query: str, isbn: str = None):
-        """Kitapyurdu'da akıllı arama - 3 aşamalı"""
+        """Kitapyurdu'da akıllı arama - 5 aşamalı"""
         import re
         
         scraper = self.scrapers.get('kitapyurdu')
@@ -89,48 +89,70 @@ class BookService:
             except Exception as e:
                 logger.debug(f"ISBN araması başarısız: {e}")
         
-        # 1️⃣ TAM SORGU ile ara
-        logger.info(f"🔍 [1/3] Tam sorgu: {query[:60]}...")
-        try:
-            result = await run_sync(scraper.search, query)
-            if result:
-                logger.info("✅ Tam sorgu ile bulundu")
-                return result
-        except Exception as e:
-            logger.debug(f"Tam sorgu hatası: {e}")
+        # Arama stratejileri listesi
+        strategies = []
         
-        # 2️⃣ BASİTLEŞTİRİLMİŞ SORGU (uzantı ve boşluklar temizlendi)
+        # 1️⃣ TAM SORGU
+        strategies.append(("Tam sorgu", query))
+        
+        # 2️⃣ BASİTLEŞTİRİLMİŞ (uzantı, tire, alt çizgi temizlendi)
         basit = re.sub(r'\.(epub|pdf)$', '', query, flags=re.IGNORECASE)
-        basit = basit.replace('_', ' ').replace('-', ' ')
+        basit = basit.replace('_', ' ').replace(' - ', ' ')
         basit = re.sub(r'\s+', ' ', basit).strip()
+        strategies.append(("Basit sorgu", basit))
         
-        if basit != query:
-            logger.info(f"🔍 [2/3] Basit sorgu: {basit[:60]}...")
-            try:
-                result = await run_sync(scraper.search, basit)
-                if result:
-                    logger.info("✅ Basit sorgu ile bulundu")
-                    return result
-            except Exception as e:
-                logger.debug(f"Basit sorgu hatası: {e}")
+        # 3️⃣ PARANTEZ İÇİ ÖNCELİKLİ
+        # "Rehine (Vanish)" → önce "Vanish", sonra "Rehine"
+        parantez_match = re.search(r'\(([^)]+)\)', basit)
+        if parantez_match:
+            parantez_ici = parantez_match.group(1).strip()
+            
+            # Yazar bilgisi varsa ekle
+            yazar_match = re.match(r'^([^\s]+(?:\s+[^\s]+)?)', basit)
+            if yazar_match:
+                yazar = yazar_match.group(1)
+                strategies.append(("Parantez içi + Yazar", f"{parantez_ici} {yazar}"))
+            
+            strategies.append(("Parantez içi", parantez_ici))
         
-        # 3️⃣ TEMİZ SORGU (sayılar ve özel karakterler temizlendi)
+        # 4️⃣ SADECE KİTAP ADI (sayılar ve özel karakterler temizlendi)
         temiz = re.sub(r'[^\wğüşıöçĞÜŞİÖÇ\s]', ' ', basit)
         temiz = re.sub(r'\b\d+\b', '', temiz)  # Sayıları kaldır
         temiz = re.sub(r'\s+', ' ', temiz).strip()
         
-        if temiz and temiz != basit:
-            logger.info(f"🔍 [3/3] Temiz sorgu: {temiz[:60]}...")
+        # Parantezi de temizle
+        temiz_parantez = re.sub(r'\([^)]*\)', '', temiz)
+        temiz_parantez = re.sub(r'\s+', ' ', temiz_parantez).strip()
+        
+        if temiz_parantez != temiz:
+            strategies.append(("Parantez temizlendi", temiz_parantez))
+        
+        strategies.append(("Temiz sorgu", temiz))
+        
+        # 5️⃣ SADECE SON İKİ KELİME (genelde kitap adı)
+        kelimeler = temiz.split()
+        if len(kelimeler) >= 2:
+            son_iki = ' '.join(kelimeler[-2:])
+            strategies.append(("Son 2 kelime", son_iki))
+        
+        # Her stratejiyi dene
+        for index, (strateji_adi, sorgu) in enumerate(strategies, 1):
+            if not sorgu or len(sorgu) < 3:
+                continue
+            
+            logger.info(f"🔍 [{index}/{len(strategies)}] {strateji_adi}: {sorgu[:60]}...")
+            
             try:
-                result = await run_sync(scraper.search, temiz)
+                result = await run_sync(scraper.search, sorgu)
                 if result:
-                    logger.info("✅ Temiz sorgu ile bulundu")
+                    logger.info(f"✅ {strateji_adi} ile bulundu!")
                     return result
             except Exception as e:
-                logger.debug(f"Temiz sorgu hatası: {e}")
+                logger.debug(f"{strateji_adi} hatası: {e}")
         
-        logger.warning(f"❌ 3 aşamada da bulunamadı: {query[:60]}")
-        return None    
+        logger.warning(f"❌ {len(strategies)} aşamada da bulunamadı: {query[:60]}")
+        return None
+
     async def _enrich_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Kitap bilgilerini zenginleştir

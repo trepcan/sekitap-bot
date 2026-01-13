@@ -142,6 +142,39 @@ class GoodreadsScraper(BaseScraper):
                 except:
                     parsed["aciklama"] = metin_duzelt(desc)
             
+            
+            # Apollo State'ten seri
+            if book_data.get("bookSeries"):
+                series_list = book_data["bookSeries"]
+                if series_list and len(series_list) > 0:
+                    series_info = series_list[0]
+                    series_name = series_info.get("series", {}).get("title")
+                    if series_name:
+                        data["seri"] = metin_duzelt(series_name)
+            
+            # ➕ Orijinal başlık (ÖNEMLİ!)
+            if book_data.get("details"):
+                details = book_data["details"]
+                
+                # Original title
+                if details.get("originalTitle"):
+                    original_title = metin_duzelt(details["originalTitle"])
+                    # Başlıkla aynı değilse ekle
+                    if original_title and original_title != parsed.get("baslik"):
+                        parsed["orijinal_ad"] = original_title
+                        logger.info(f"🌍 Orijinal Ad: {parsed['orijinal_ad']}")
+            
+            # Work referansından da dene
+            if not parsed.get("orijinal_ad") and book_data.get("work"):
+                work_ref = book_data["work"].get("__ref")
+                if work_ref and work_ref in apollo_state:
+                    work_data = apollo_state[work_ref]
+                    if work_data.get("details") and work_data["details"].get("originalTitle"):
+                        original_title = metin_duzelt(work_data["details"]["originalTitle"])
+                        if original_title and original_title != parsed.get("baslik"):
+                            parsed["orijinal_ad"] = original_title
+                            logger.info(f"🌍 Orijinal Ad (Work): {parsed['orijinal_ad']}")
+                        
             # Yazarlar
             authors = []
             translators = []
@@ -369,3 +402,117 @@ class GoodreadsScraper(BaseScraper):
                         data["tarih"] = metin_duzelt(raw_date)
                     if not data["yayinevi"]:
                         data["yayinevi"] = turkce_baslik(metin_duzelt(raw_pub))
+
+    async def enrich_with_goodreads(
+        self, 
+        data: Dict[str, Any], 
+        isbn: str = None
+    ) -> Dict[str, Any]:
+        """
+        Goodreads ile zenginleştir
+        - Orijinal ad ➕
+        - Puan
+        - Tür
+        - Seri ➕
+        - Açıklama
+        """
+        try:
+            # Zenginleştirme gerekli mi kontrol et
+            needs_enrichment = (
+                not data.get("turu") or 
+                not data.get("puan") or 
+                not data.get("orijinal_ad") or
+                not data.get("seri")
+            )
+            
+            if not needs_enrichment:
+                logger.info("ℹ️ Tüm bilgiler mevcut, Goodreads atlandı")
+                return data
+            
+            scraper = self.scrapers['goodreads']
+            gr_result = None
+            
+            # ➕ 1️⃣ İlk olarak ISBN varsa ISBN ile ara
+            if isbn or data.get("isbn"):
+                search_term = isbn or data.get("isbn")
+                logger.info(f"🔍 Goodreads'te aranıyor: {search_term}...")
+                
+                try:
+                    gr_result = await run_sync(
+                        scraper.search, 
+                        search_term, 
+                        is_isbn_search=True
+                    )
+                except Exception as e:
+                    # ➕ ISBN bulunamadı, başlık+yazar ile dene
+                    error_str = str(e)
+                    if "404" in error_str or "Not Found" in error_str:
+                        logger.warning("⚠️ ISBN ile bulunamadı, başlık+yazar ile deneniyor...")
+                        gr_result = None
+                    else:
+                        # Başka bir hata, yeniden fırlat
+                        raise
+            
+            # ➕ 2️⃣ ISBN yoksa veya ISBN'de bulunamadıysa başlık+yazar ile ara
+            if not gr_result:
+                search_term = f"{data.get('baslik', '')} {data.get('yazar', '')}".strip()
+                
+                if not search_term:
+                    return data
+                
+                logger.info(f"🔍 Goodreads'te aranıyor: {search_term[:50]}...")
+                
+                gr_result = await run_sync(scraper.search, search_term)
+            
+            if gr_result:
+                updated = False
+                
+                # Orijinal ad
+                if not data.get("orijinal_ad") and gr_result.get("orijinal_ad"):
+                    data["orijinal_ad"] = gr_result["orijinal_ad"]
+                    updated = True
+                    logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
+                
+                # Tür
+                if not data.get("turu") and gr_result.get("turu"):
+                    data["turu"] = gr_result["turu"]
+                    updated = True
+                    logger.info(f"   ➕ Tür: {data['turu']}")
+                
+                # Puan
+                if not data.get("puan") and gr_result.get("puan"):
+                    data["puan"] = gr_result["puan"]
+                    data["oy_sayisi"] = gr_result.get("oy_sayisi")
+                    updated = True
+                    logger.info(f"   ➕ Puan: {data['puan']} ({data.get('oy_sayisi')} oy)")
+                
+                # Seri
+                if not data.get("seri") and gr_result.get("seri"):
+                    data["seri"] = gr_result["seri"]
+                    updated = True
+                    logger.info(f"   ➕ Seri: {data['seri']}")
+                
+                # Açıklama (zayıfsa güncelle)
+                mevcut_aciklama = data.get("aciklama", "").lower()
+                is_weak_desc = (
+                    not data.get("aciklama") or 
+                    len(data.get("aciklama", "")) < 25 or
+                    "açıklama bulunamadı" in mevcut_aciklama
+                )
+                
+                if is_weak_desc and gr_result.get("aciklama") and len(gr_result["aciklama"]) > 25:
+                    data["aciklama"] = gr_result["aciklama"]
+                    updated = True
+                    logger.info("   ➕ Açıklama güncellendi")
+                
+                if updated:
+                    logger.info("✅ Goodreads ile zenginleştirildi")
+                else:
+                    logger.info("ℹ️ Goodreads'ten yeni bilgi eklenmedi")
+            else:
+                logger.debug("⚠️ Goodreads'te sonuç bulunamadı")
+        
+        except Exception as e:
+            logger.error(f"❌ Goodreads zenginleştirme hatası: {e}")
+        
+        return data

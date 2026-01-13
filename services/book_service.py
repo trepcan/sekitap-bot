@@ -79,14 +79,18 @@ class BookService:
                     if self._validate_result(sonuc, temiz_ad, is_isbn, manuel_mod):
                         logger.info(f"✅ Bulundu: {name} - {sonuc.get('baslik')}")
                         
-                        # ⭐ ZENGİNLEŞTİRME (Yeni)
-                        # Goodreads ile zenginleştir (puan, tür, seri, orijinal ad)
+                        # ⭐ ZENGİNLEŞTİRME
+                        logger.info("✨ Zenginleştirme başlatılıyor...")
+                        
+                        # 1️⃣ Goodreads ile zenginleştir (puan, tür, seri, orijinal ad)
                         if key != 'goodreads':
                             sonuc = await self.enrich_with_goodreads(sonuc)
                         
-                        # Orijinal ad hala yoksa 1000Kitap'tan dene
-                        if not sonuc.get("orijinal_ad") and key != 'binkitap':
+                        # 2️⃣ Eksik bilgiler için 1000Kitap'tan dene
+                        if (not sonuc.get("orijinal_ad") or not sonuc.get("seri")) and key != 'binkitap':
                             sonuc = await self.enrich_with_binkitap(sonuc)
+                        
+                        logger.info("✅ Zenginleştirme tamamlandı")
                         
                         # Önbelleğe kaydet
                         if not manuel_mod and not is_isbn:
@@ -136,13 +140,18 @@ class BookService:
             if result:
                 logger.info(f"✅ URL'den bulundu: {kaynak}")
                 
-                # ⭐ ZENGİNLEŞTİRME (Yeni)
+                # ⭐ ZENGİNLEŞTİRME
+                logger.info("✨ Zenginleştirme başlatılıyor...")
+                
                 # Goodreads dışındaki kaynaklardan geldiyse zenginleştir
                 if kaynak != "Goodreads":
                     result = await self.enrich_with_goodreads(result)
-                    # Orijinal ad yoksa 1000Kitap dene
-                    if not result.get("orijinal_ad") and kaynak != "1000Kitap":
+                    
+                    # Eksik bilgiler için 1000Kitap dene
+                    if (not result.get("orijinal_ad") or not result.get("seri")) and kaynak != "1000Kitap":
                         result = await self.enrich_with_binkitap(result)
+                
+                logger.info("✅ Zenginleştirme tamamlandı")
                 
                 return result, kaynak, None
         except Exception as e:
@@ -215,17 +224,24 @@ class BookService:
         isbn: str = None
     ) -> Dict[str, Any]:
         """
-        Goodreads ile zenginleştir (puan, tür, seri, orijinal ad)
+        Goodreads ile zenginleştir
+        - Orijinal ad ➕
+        - Puan
+        - Tür
+        - Seri ➕
+        - Açıklama
         """
         try:
             # Zenginleştirme gerekli mi kontrol et
             needs_enrichment = (
                 not data.get("turu") or 
                 not data.get("puan") or 
-                not data.get("orijinal_ad")  # ➕ Yeni
+                not data.get("orijinal_ad") or
+                not data.get("seri")  # ➕ Seri kontrolü
             )
             
             if not needs_enrichment:
+                logger.info("ℹ️ Tüm bilgiler mevcut, Goodreads atlandı")
                 return data
             
             # ISBN varsa ISBN ile ara
@@ -252,7 +268,7 @@ class BookService:
             if gr_result:
                 updated = False
                 
-                # Orijinal ad ➕ (Yeni)
+                # Orijinal ad
                 if not data.get("orijinal_ad") and gr_result.get("orijinal_ad"):
                     data["orijinal_ad"] = gr_result["orijinal_ad"]
                     updated = True
@@ -269,23 +285,31 @@ class BookService:
                     data["puan"] = gr_result["puan"]
                     data["oy_sayisi"] = gr_result.get("oy_sayisi")
                     updated = True
-                    logger.info(f"   ➕ Puan: {data['puan']}")
+                    logger.info(f"   ➕ Puan: {data['puan']} ({data.get('oy_sayisi')} oy)")
                 
-                # Seri
+                # Seri ➕
                 if not data.get("seri") and gr_result.get("seri"):
                     data["seri"] = gr_result["seri"]
                     updated = True
                     logger.info(f"   ➕ Seri: {data['seri']}")
                 
                 # Açıklama (zayıfsa güncelle)
-                if not data.get("aciklama") or len(data.get("aciklama", "")) < 25:
-                    if gr_result.get("aciklama") and len(gr_result["aciklama"]) > 25:
-                        data["aciklama"] = gr_result["aciklama"]
-                        updated = True
-                        logger.info("   ➕ Açıklama güncellendi")
+                mevcut_aciklama = data.get("aciklama", "").lower()
+                is_weak_desc = (
+                    not data.get("aciklama") or 
+                    len(data.get("aciklama", "")) < 25 or
+                    "açıklama bulunamadı" in mevcut_aciklama
+                )
+                
+                if is_weak_desc and gr_result.get("aciklama") and len(gr_result["aciklama"]) > 25:
+                    data["aciklama"] = gr_result["aciklama"]
+                    updated = True
+                    logger.info("   ➕ Açıklama güncellendi")
                 
                 if updated:
                     logger.info("✅ Goodreads ile zenginleştirildi")
+                else:
+                    logger.info("ℹ️ Goodreads'ten yeni bilgi eklenmedi")
             else:
                 logger.debug("⚠️ Goodreads'te sonuç bulunamadı")
         
@@ -299,11 +323,15 @@ class BookService:
         data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        1000Kitap ile zenginleştir (orijinal ad, çevirmen)
+        1000Kitap ile zenginleştir
+        - Orijinal ad ➕
+        - Çevirmen ➕
+        - Seri ➕ (Yeni)
         """
         try:
-            # Orijinal ad zaten varsa geç
-            if data.get("orijinal_ad"):
+            # Tüm bilgiler varsa geç
+            if data.get("orijinal_ad") and data.get("seri") and data.get("cevirmen"):
+                logger.info("ℹ️ Tüm bilgiler mevcut, 1000Kitap atlandı")
                 return data
             
             # Başlık yoksa çalışma
@@ -337,14 +365,22 @@ class BookService:
                     updated = True
                     logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
                 
-                # Çevirmen (bonus)
+                # Çevirmen
                 if not data.get("cevirmen") and bk_result.get("cevirmen"):
                     data["cevirmen"] = bk_result["cevirmen"]
                     updated = True
                     logger.info(f"   ➕ Çevirmen: {data['cevirmen']}")
                 
+                # Seri ➕ (Yeni)
+                if not data.get("seri") and bk_result.get("seri"):
+                    data["seri"] = bk_result["seri"]
+                    updated = True
+                    logger.info(f"   ➕ Seri: {data['seri']}")
+                
                 if updated:
                     logger.info("✅ 1000Kitap ile zenginleştirildi")
+                else:
+                    logger.info("ℹ️ 1000Kitap'tan yeni bilgi eklenmedi")
             else:
                 logger.debug("⚠️ 1000Kitap'ta sonuç bulunamadı")
         

@@ -1,0 +1,3 @@
+git add * # Tüm Değişiklikleri staged(hazır) alanına ekler.
+git commit -m "First" # Staged alanındaki tüm değişiklikleri "First" adıyla commit olarak kaydeder.
+git push -u origin master # Değişiklikleri repodaki master branchine gönderir.

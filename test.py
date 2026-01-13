@@ -1,38 +1,41 @@
 #!/usr/bin/env python3
-"""Seri ayrıştırma testi"""
-import logging
-from scrapers.binkitap import BinKitapScraper
+"""Seri çeviri debug testi"""
+from utils.series_utils import translate_series_name, normalize_series_name
 
-logging.basicConfig(level=logging.INFO)
-
-scraper = BinKitapScraper()
-
-test_books = [
-    "Harry Potter Felsefe Taşı",
-    "Dune Frank Herbert",
-    "Foundation Isaac Asimov",
+test_series = [
+    "Dune #1",
+    "Foundation #2",
+    "The Lord of the Rings #1",
+    "Harry Potter #3",
+    "The Witcher #5",
+    "A Song of Ice and Fire #1",
+    "Unknown Series #1",
 ]
 
-for book in test_books:
-    print("\n" + "=" * 60)
-    print(f"TEST: {book}")
-    print("=" * 60)
+print("🌍 Seri Çeviri Testi (Debug)\n")
+
+for series in test_series:
+    # Seri adını ayır
+    import re
+    match = re.match(r'^(.+?)\s*#(\d+)$', series)
     
-    result = scraper.search(book)
-    
-    if result:
-        print(f"✅ Başlık: {result.get('baslik')}")
-        print(f"✍️ Yazar: {result.get('yazar')}")
+    if match:
+        series_name = match.group(1).strip()
+        series_number = match.group(2)
         
-        if result.get('orijinal_ad'):
-            print(f"🌍 Orijinal Ad: {result.get('orijinal_ad')} ✅")
+        # Normalize et
+        normalized = normalize_series_name(series_name)
         
-        if result.get('seri'):
-            print(f"📚 Seri: {result.get('seri')} ✅")
+        print(f"📖 Orijinal: {series}")
+        print(f"   ├─ İsim: {series_name}")
+        print(f"   ├─ Normalize: '{normalized}'")
+        
+        # Çevir
+        translated = translate_series_name(series)
+        
+        if series != translated:
+            print(f"   └─ ✅ Çeviri: {translated}")
         else:
-            print("⚠️ Seri yok")
+            print(f"   └─ ⚠️ Çeviri yok")
         
-        if result.get('cevirmen'):
-            print(f"🔤 Çevirmen: {result.get('cevirmen')}")
-    else:
-        print("❌ Bulunamadı")
+        print()

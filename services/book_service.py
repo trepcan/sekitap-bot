@@ -1,419 +1,360 @@
-import asyncio
-import re
+"""
+Kitap arama ve zenginleştirme servisi
+"""
 import logging
-from typing import Optional, Dict, Any, Tuple
+from typing import Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 
 from scrapers.kitapyurdu import KitapyurduScraper
-from scrapers.binkitap import BinKitapScraper
 from scrapers.goodreads import GoodreadsScraper
-from utils.text_utils import metni_temizle, benzerlik_orani, kelime_kumesi_orani, turkce_kucult
-from utils.helpers import run_sync, basit_bilgi_cikar
-from database.db_manager import db
-from config.settings import settings
-from config.constants import veri_kalibi
+from scrapers.binkitap import BinKitapScraper
+from utils.async_utils import run_sync
+from utils.text_utils import metin_duzelt, benzerlik_orani
 from utils.series_utils import translate_series_name, prefer_turkish_series
 
 logger = logging.getLogger(__name__)
 
 
 class BookService:
-    """Kitap arama ve veri zenginleştirme servisi"""
+    """Kitap arama ve zenginleştirme servisi"""
     
     def __init__(self):
         self.scrapers = {
             'kitapyurdu': KitapyurduScraper(),
-            'binkitap': BinKitapScraper(),
             'goodreads': GoodreadsScraper(),
+            'binkitap': BinKitapScraper()
         }
+        self.executor = ThreadPoolExecutor(max_workers=3)
     
     async def search_book(
         self, 
-        search_text: str, 
+        query: str, 
+        isbn: str = None,
         manuel_mod: bool = False
-    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
+    ):
         """
-        Kitap ara
+        Kitap ara ve zenginleştir
         
         Returns:
-            (kitap_verisi, kaynak_adi, temiz_arama_metni)
+            tuple: (kitap_bilgileri: dict|None, kaynak: str, basarili: bool)
         """
-        # URL ile arama
-        if "http" in search_text:
-            return await self._search_by_url(search_text)
-        
-        # Metni temizle
-        temiz_ad = metni_temizle(search_text, manuel_mod)
-        logger.info(f"🔎 Aranıyor: {temiz_ad}")
-        
-        # ISBN kontrolü
-        is_isbn = temiz_ad.isdigit() and len(temiz_ad) in [10, 13]
-        
-        # Önbellek kontrolü (ISBN veya manuel mod değilse)
-        if not manuel_mod and not is_isbn:
-            cached = db.getir(temiz_ad)
-            if cached:
-                logger.info(f"💾 Önbellekten alındı: {temiz_ad}")
-                return cached, "Önbellek", temiz_ad
-        
-        # Kaynaklarda ara
-        sources = [
-            ('kitapyurdu', 'Kitapyurdu'),
-            ('binkitap', '1000Kitap'),
-            ('goodreads', 'Goodreads'),
-        ]
-        
-        for key, name in sources:
-            # Rate limiting
-            await asyncio.sleep(settings.RATE_LIMIT_DELAY)
-            
-            try:
-                scraper = self.scrapers[key]
-                
-                # ISBN araması için özel işlem (Goodreads)
-                if is_isbn and key == 'goodreads':
-                    sonuc = await run_sync(scraper.search, temiz_ad, is_isbn_search=True)
-                else:
-                    sonuc = await run_sync(scraper.search, temiz_ad)
-                
-                if sonuc:
-                    # Validasyon
-                    if self._validate_result(sonuc, temiz_ad, is_isbn, manuel_mod):
-                        logger.info(f"✅ Bulundu: {name} - {sonuc.get('baslik')}")
-                        
-                        # ⭐ ZENGİNLEŞTİRME
-                        logger.info("✨ Zenginleştirme başlatılıyor...")
-                        
-                        # 1️⃣ Goodreads ile zenginleştir (puan, tür, seri, orijinal ad)
-                        if key != 'goodreads':
-                            sonuc = await self.enrich_with_goodreads(sonuc)
-                        
-                        # 2️⃣ Eksik bilgiler için 1000Kitap'tan dene
-                        if (not sonuc.get("orijinal_ad") or not sonuc.get("seri")) and key != 'binkitap':
-                            sonuc = await self.enrich_with_binkitap(sonuc)
-                        
-                        logger.info("✅ Zenginleştirme tamamlandı")
-                        
-                        # Önbelleğe kaydet
-                        if not manuel_mod and not is_isbn:
-                            db.kaydet(temiz_ad, sonuc)
-                        
-                        return sonuc, name, temiz_ad
-                    else:
-                        logger.debug(f"⚠️ Validasyon başarısız: {name}")
-            
-            except Exception as e:
-                logger.error(f"❌ Hata ({name}): {e}")
-                continue
-        
-        # Hiçbir kaynakta bulunamadı
-        logger.warning(f"❌ Hiçbir kaynakta bulunamadı: {temiz_ad}")
-        return None, None, None
-    
-    async def _search_by_url(
-        self, 
-        text: str
-    ) -> Tuple[Optional[Dict[str, Any]], Optional[str], Optional[str]]:
-        """URL ile direkt arama"""
-        # URL'yi çıkar
-        match = re.search(r'(https?://\S+)', text)
-        if not match:
-            return None, None, None
-        
-        url = match.group(1)
-        logger.info(f"🔗 URL ile arama: {url}")
-        
-        # URL'ye göre scraper seç
-        if 'kitapyurdu.com' in url:
-            scraper = self.scrapers['kitapyurdu']
-            kaynak = "Kitapyurdu"
-        elif '1000kitap.com' in url:
-            scraper = self.scrapers['binkitap']
-            kaynak = "1000Kitap"
-        elif 'goodreads.com' in url:
-            scraper = self.scrapers['goodreads']
-            kaynak = "Goodreads"
-        else:
-            logger.warning(f"⚠️ Desteklenmeyen URL: {url}")
-            return None, None, None
+        logger.info(f"🔎 Aranıyor: {query}")
         
         try:
-            result = await run_sync(scraper.search, None, direct_url=url)
-            if result:
-                logger.info(f"✅ URL'den bulundu: {kaynak}")
-                
-                # ⭐ ZENGİNLEŞTİRME
-                logger.info("✨ Zenginleştirme başlatılıyor...")
-                
-                # Goodreads dışındaki kaynaklardan geldiyse zenginleştir
-                if kaynak != "Goodreads":
-                    result = await self.enrich_with_goodreads(result)
-                    
-                    # Eksik bilgiler için 1000Kitap dene
-                    if (not result.get("orijinal_ad") or not result.get("seri")) and kaynak != "1000Kitap":
-                        result = await self.enrich_with_binkitap(result)
-                
-                logger.info("✅ Zenginleştirme tamamlandı")
-                
-                return result, kaynak, None
+            # Kitapyurdu'da ara
+            kitapyurdu_data = await self._search_kitapyurdu(query, isbn)
+            
+            if not kitapyurdu_data:
+                logger.warning(f"❌ Hiçbir kaynakta bulunamadı: {query}")
+                return (None, "Yok", False)  # ← TUPLE!
+            
+            # Kaynak bilgisi
+            kaynak = "Kitapyurdu"
+            kitapyurdu_data["kaynak"] = kaynak
+            
+            logger.info(f"✅ Bulundu: {kaynak} - {kitapyurdu_data.get('baslik', 'N/A')}")
+            
+            # Zenginleştirme
+            if not manuel_mod:
+                enriched_data = await self._enrich_data(kitapyurdu_data)
+                return (enriched_data, kaynak, True)  # ← TUPLE!
+            else:
+                logger.info("ℹ️ Manuel mod, zenginleştirme atlandı")
+                return (kitapyurdu_data, kaynak, True)  # ← TUPLE!
+        
         except Exception as e:
-            logger.error(f"❌ URL arama hatası: {e}")
+            logger.error(f"❌ Arama hatası: {e}")
+            import traceback
+            traceback.print_exc()
+            return (None, "Hata", False)  # ← TUPLE!
+
+
+    async def _search_kitapyurdu(self, query: str, isbn: str = None):
+        """Kitapyurdu'da akıllı arama - 3 aşamalı"""
+        import re
         
-        return None, None, None
-    
-    def _validate_result(
-        self, 
-        sonuc: Dict[str, Any], 
-        temiz_ad: str, 
-        is_isbn: bool, 
-        manuel_mod: bool
-    ) -> bool:
-        """Sonucu doğrula"""
-        if not sonuc:
-            return False
+        scraper = self.scrapers.get('kitapyurdu')
+        if not scraper:
+            logger.error("❌ Kitapyurdu scraper bulunamadı")
+            return None
         
-        # ISBN aramasıysa direkt ISBN karşılaştır
-        if is_isbn:
-            gelen_isbn = re.sub(r'\D', '', sonuc.get('isbn', '') or '')
-            if gelen_isbn:
-                return temiz_ad == gelen_isbn
-            # ISBN gelmemişse manuel modda kabul et
-            return manuel_mod
+        # ISBN varsa önce ISBN ile ara
+        if isbn:
+            try:
+                result = await run_sync(scraper.search, isbn)
+                if result:
+                    logger.info(f"✅ ISBN ile bulundu: {isbn}")
+                    return result
+            except Exception as e:
+                logger.debug(f"ISBN araması başarısız: {e}")
         
-        # Manuel modsa doğrulama yapma
-        if manuel_mod:
-            return True
+        # 1️⃣ TAM SORGU ile ara
+        logger.info(f"🔍 [1/3] Tam sorgu: {query[:60]}...")
+        try:
+            result = await run_sync(scraper.search, query)
+            if result:
+                logger.info("✅ Tam sorgu ile bulundu")
+                return result
+        except Exception as e:
+            logger.debug(f"Tam sorgu hatası: {e}")
         
-        # Başlık kontrolü
-        if not sonuc.get('baslik'):
-            return False
+        # 2️⃣ BASİTLEŞTİRİLMİŞ SORGU (uzantı ve boşluklar temizlendi)
+        basit = re.sub(r'\.(epub|pdf)$', '', query, flags=re.IGNORECASE)
+        basit = basit.replace('_', ' ').replace('-', ' ')
+        basit = re.sub(r'\s+', ' ', basit).strip()
         
-        # Basit substring kontrolü
-        aranan = turkce_kucult(temiz_ad)
-        bulunan_baslik = turkce_kucult(sonuc.get('baslik', ''))
-        bulunan_yazar = turkce_kucult(sonuc.get('yazar', ''))
-        bulunan_tam = f"{bulunan_baslik} {bulunan_yazar}"
+        if basit != query:
+            logger.info(f"🔍 [2/3] Basit sorgu: {basit[:60]}...")
+            try:
+                result = await run_sync(scraper.search, basit)
+                if result:
+                    logger.info("✅ Basit sorgu ile bulundu")
+                    return result
+            except Exception as e:
+                logger.debug(f"Basit sorgu hatası: {e}")
         
-        # Direkt içerme kontrolü
-        if aranan in bulunan_tam or bulunan_baslik in aranan:
-            return True
+        # 3️⃣ TEMİZ SORGU (sayılar ve özel karakterler temizlendi)
+        temiz = re.sub(r'[^\wğüşıöçĞÜŞİÖÇ\s]', ' ', basit)
+        temiz = re.sub(r'\b\d+\b', '', temiz)  # Sayıları kaldır
+        temiz = re.sub(r'\s+', ' ', temiz).strip()
         
-        # Benzerlik oranı kontrolü
-        oran = benzerlik_orani(temiz_ad, bulunan_tam)
-        if oran >= settings.BENZERLIK_ORANI:
-            return True
+        if temiz and temiz != basit:
+            logger.info(f"🔍 [3/3] Temiz sorgu: {temiz[:60]}...")
+            try:
+                result = await run_sync(scraper.search, temiz)
+                if result:
+                    logger.info("✅ Temiz sorgu ile bulundu")
+                    return result
+            except Exception as e:
+                logger.debug(f"Temiz sorgu hatası: {e}")
         
-        # Kelime kümesi eşleşme oranı
-        kelime_oran = kelime_kumesi_orani(temiz_ad, bulunan_tam)
-        if kelime_oran >= settings.KELIME_ESLESME_ORANI:
-            return True
+        logger.warning(f"❌ 3 aşamada da bulunamadı: {query[:60]}")
+        return None    
+    async def _enrich_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Kitap bilgilerini zenginleştir
         
-        return False
-    
-    def create_fallback_data(self, file_name: str) -> Dict[str, Any]:
-        """Bulunamayan kitaplar için fallback veri oluştur"""
-        basit = basit_bilgi_cikar(file_name)
+        Zenginleştirme sırası:
+        1. Goodreads (puan, tür, orijinal ad, seri)
+        2. 1000Kitap (çevirmen, orijinal ad, seri)
+        """
+        logger.info("✨ Zenginleştirme başlatılıyor...")
         
-        data = veri_kalibi()
-        data.update(basit)
-        data["aciklama"] = "Kitap bilgisi otomatik olarak bulunamadı."
+        try:
+            # Goodreads ile zenginleştir
+            data = await self.enrich_with_goodreads(data, data.get("isbn"))
+            
+            # 1000Kitap ile zenginleştir
+            data = await self.enrich_with_binkitap(data)
+            
+            logger.info("✅ Zenginleştirme tamamlandı")
+        
+        except Exception as e:
+            logger.error(f"❌ Zenginleştirme hatası: {e}")
+            # Hata olsa bile ana veriyi koru!
         
         return data
     
-async def enrich_with_goodreads(
-    self, 
-    data: Dict[str, Any], 
-    isbn: str = None
-) -> Dict[str, Any]:
-    """
-    Goodreads ile zenginleştir
-    - Orijinal ad ➕
-    - Puan
-    - Tür
-    - Seri ➕ (Türkçeleştirilmiş)
-    - Açıklama
-    """
-    try:
-        # Zenginleştirme gerekli mi kontrol et
-        needs_enrichment = (
-            not data.get("turu") or 
-            not data.get("puan") or 
-            not data.get("orijinal_ad") or
-            not data.get("seri")
-        )
-        
-        if not needs_enrichment:
-            logger.info("ℹ️ Tüm bilgiler mevcut, Goodreads atlandı")
-            return data
-        
-        scraper = self.scrapers['goodreads']
-        gr_result = None
-        
-        # 1️⃣ İlk olarak ISBN varsa ISBN ile ara
-        if isbn or data.get("isbn"):
-            search_term = isbn or data.get("isbn")
-            logger.info(f"🔍 Goodreads'te aranıyor: {search_term}...")
+    async def enrich_with_goodreads(
+        self, 
+        data: Dict[str, Any], 
+        isbn: str = None
+    ) -> Dict[str, Any]:
+        """
+        Goodreads ile zenginleştir
+        - Orijinal ad ➕
+        - Puan
+        - Tür
+        - Seri ➕ (Türkçeleştirilmiş)
+        - Açıklama
+        """
+        try:
+            # Zenginleştirme gerekli mi kontrol et
+            needs_enrichment = (
+                not data.get("turu") or 
+                not data.get("puan") or 
+                not data.get("orijinal_ad") or
+                not data.get("seri")
+            )
             
-            try:
-                gr_result = await run_sync(
-                    scraper.search, 
-                    search_term, 
-                    is_isbn_search=True
+            if not needs_enrichment:
+                logger.info("ℹ️ Tüm bilgiler mevcut, Goodreads atlandı")
+                return data
+            
+            scraper = self.scrapers['goodreads']
+            gr_result = None
+            
+            # 1️⃣ İlk olarak ISBN varsa ISBN ile ara
+            if isbn or data.get("isbn"):
+                search_term = isbn or data.get("isbn")
+                logger.info(f"🔍 Goodreads'te aranıyor: {search_term}...")
+                
+                try:
+                    gr_result = await run_sync(
+                        scraper.search, 
+                        search_term, 
+                        is_isbn_search=True
+                    )
+                except Exception as e:
+                    error_str = str(e)
+                    if "404" in error_str or "Not Found" in error_str:
+                        logger.warning("⚠️ ISBN ile bulunamadı, başlık+yazar ile deneniyor...")
+                        gr_result = None
+                    else:
+                        logger.debug(f"Goodreads ISBN hatası: {e}")
+                        gr_result = None
+            
+            # 2️⃣ ISBN yoksa veya ISBN'de bulunamadıysa başlık+yazar ile ara
+            if not gr_result:
+                search_term = f"{data.get('baslik', '')} {data.get('yazar', '')}".strip()
+                
+                if not search_term:
+                    return data
+                
+                logger.info(f"🔍 Goodreads'te aranıyor: {search_term[:50]}...")
+                
+                try:
+                    gr_result = await run_sync(scraper.search, search_term)
+                except Exception as e:
+                    logger.debug(f"Goodreads arama hatası: {e}")
+                    return data
+            
+            if gr_result:
+                updated = False
+                
+                # Orijinal ad
+                if not data.get("orijinal_ad") and gr_result.get("orijinal_ad"):
+                    data["orijinal_ad"] = gr_result["orijinal_ad"]
+                    updated = True
+                    logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
+                
+                # Tür
+                if not data.get("turu") and gr_result.get("turu"):
+                    data["turu"] = gr_result["turu"]
+                    updated = True
+                    logger.info(f"   ➕ Tür: {data['turu']}")
+                
+                # Puan
+                if not data.get("puan") and gr_result.get("puan"):
+                    data["puan"] = gr_result["puan"]
+                    data["oy_sayisi"] = gr_result.get("oy_sayisi")
+                    updated = True
+                    logger.info(f"   ➕ Puan: {data['puan']} ({data.get('oy_sayisi')} oy)")
+                
+                # ➕ Seri (Türkçeleştirilmiş)
+                if gr_result.get("seri"):
+                    existing_series = data.get("seri")
+                    translated_series = translate_series_name(gr_result["seri"])
+                    final_series = prefer_turkish_series(existing_series, translated_series)
+                    
+                    if final_series and final_series != existing_series:
+                        data["seri"] = final_series
+                        updated = True
+                        logger.info(f"   ➕ Seri: {data['seri']}")
+                
+                # Açıklama
+                mevcut_aciklama = data.get("aciklama", "").lower()
+                is_weak_desc = (
+                    not data.get("aciklama") or 
+                    len(data.get("aciklama", "")) < 25 or
+                    "açıklama bulunamadı" in mevcut_aciklama
                 )
-            except Exception as e:
-                error_str = str(e)
-                if "404" in error_str or "Not Found" in error_str:
-                    logger.warning("⚠️ ISBN ile bulunamadı, başlık+yazar ile deneniyor...")
-                    gr_result = None
+                
+                if is_weak_desc and gr_result.get("aciklama") and len(gr_result["aciklama"]) > 25:
+                    data["aciklama"] = gr_result["aciklama"]
+                    updated = True
+                    logger.info("   ➕ Açıklama güncellendi")
+                
+                if updated:
+                    logger.info("✅ Goodreads ile zenginleştirildi")
                 else:
-                    raise
+                    logger.info("ℹ️ Goodreads'ten yeni bilgi eklenmedi")
+            else:
+                logger.debug("⚠️ Goodreads'te sonuç bulunamadı")
         
-        # 2️⃣ ISBN yoksa veya ISBN'de bulunamadıysa başlık+yazar ile ara
-        if not gr_result:
+        except Exception as e:
+            logger.error(f"❌ Goodreads zenginleştirme hatası: {e}")
+        
+        return data
+    
+    async def enrich_with_binkitap(
+        self, 
+        data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        1000Kitap ile zenginleştir
+        - Orijinal ad ➕
+        - Çevirmen ➕
+        - Seri ➕ (Zaten Türkçe)
+        """
+        try:
+            if data.get("orijinal_ad") and data.get("seri") and data.get("cevirmen"):
+                logger.info("ℹ️ Tüm bilgiler mevcut, 1000Kitap atlandı")
+                return data
+            
+            if not data.get("baslik"):
+                return data
+            
             search_term = f"{data.get('baslik', '')} {data.get('yazar', '')}".strip()
             
-            if not search_term:
+            logger.info(f"🔍 1000Kitap'ta aranıyor: {search_term[:50]}...")
+            
+            scraper = self.scrapers['binkitap']
+            
+            try:
+                bk_result = await run_sync(scraper.search, search_term)
+            except Exception as e:
+                logger.debug(f"1000Kitap arama hatası: {e}")
                 return data
             
-            logger.info(f"🔍 Goodreads'te aranıyor: {search_term[:50]}...")
-            
-            gr_result = await run_sync(scraper.search, search_term)
-        
-        if gr_result:
-            updated = False
-            
-            # Orijinal ad
-            if not data.get("orijinal_ad") and gr_result.get("orijinal_ad"):
-                data["orijinal_ad"] = gr_result["orijinal_ad"]
-                updated = True
-                logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
-            
-            # Tür
-            if not data.get("turu") and gr_result.get("turu"):
-                data["turu"] = gr_result["turu"]
-                updated = True
-                logger.info(f"   ➕ Tür: {data['turu']}")
-            
-            # Puan
-            if not data.get("puan") and gr_result.get("puan"):
-                data["puan"] = gr_result["puan"]
-                data["oy_sayisi"] = gr_result.get("oy_sayisi")
-                updated = True
-                logger.info(f"   ➕ Puan: {data['puan']} ({data.get('oy_sayisi')} oy)")
-            
-            # ➕ Seri (Türkçeleştirilmiş)
-            if gr_result.get("seri"):
-                # Mevcut seri (1000Kitap'tan gelebilir)
-                existing_series = data.get("seri")
+            if bk_result:
+                benzerlik = benzerlik_orani(
+                    data.get('baslik', ''), 
+                    bk_result.get('baslik', '')
+                )
                 
-                # Goodreads'ten gelen seriyi çevir
-                translated_series = translate_series_name(gr_result["seri"])
+                if benzerlik < 0.6:
+                    logger.debug(f"⚠️ Düşük benzerlik ({benzerlik:.2f}), atlanıyor")
+                    return data
                 
-                # Türkçe olanı tercih et
-                final_series = prefer_turkish_series(existing_series, translated_series)
+                updated = False
                 
-                if final_series and final_series != existing_series:
-                    data["seri"] = final_series
+                if not data.get("orijinal_ad") and bk_result.get("orijinal_ad"):
+                    data["orijinal_ad"] = bk_result["orijinal_ad"]
+                    updated = True
+                    logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
+                
+                if not data.get("cevirmen") and bk_result.get("cevirmen"):
+                    data["cevirmen"] = bk_result["cevirmen"]
+                    updated = True
+                    logger.info(f"   ➕ Çevirmen: {data['cevirmen']}")
+                
+                if not data.get("seri") and bk_result.get("seri"):
+                    data["seri"] = bk_result["seri"]
                     updated = True
                     logger.info(f"   ➕ Seri: {data['seri']}")
-            
-            # Açıklama (zayıfsa güncelle)
-            mevcut_aciklama = data.get("aciklama", "").lower()
-            is_weak_desc = (
-                not data.get("aciklama") or 
-                len(data.get("aciklama", "")) < 25 or
-                "açıklama bulunamadı" in mevcut_aciklama
-            )
-            
-            if is_weak_desc and gr_result.get("aciklama") and len(gr_result["aciklama"]) > 25:
-                data["aciklama"] = gr_result["aciklama"]
-                updated = True
-                logger.info("   ➕ Açıklama güncellendi")
-            
-            if updated:
-                logger.info("✅ Goodreads ile zenginleştirildi")
+                
+                if updated:
+                    logger.info("✅ 1000Kitap ile zenginleştirildi")
+                else:
+                    logger.info("ℹ️ 1000Kitap'tan yeni bilgi eklenmedi")
             else:
-                logger.info("ℹ️ Goodreads'ten yeni bilgi eklenmedi")
-        else:
-            logger.debug("⚠️ Goodreads'te sonuç bulunamadı")
+                logger.debug("⚠️ 1000Kitap'ta sonuç bulunamadı")
+        
+        except Exception as e:
+            logger.error(f"❌ 1000Kitap zenginleştirme hatası: {e}")
+        
+        return data
     
-    except Exception as e:
-        logger.error(f"❌ Goodreads zenginleştirme hatası: {e}")
-    
-    return data
+    def close(self):
+        """Kaynakları temizle"""
+        self.executor.shutdown(wait=False)
 
 
-async def enrich_with_binkitap(
-    self, 
-    data: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    1000Kitap ile zenginleştir
-    - Orijinal ad ➕
-    - Çevirmen ➕
-    - Seri ➕ (Zaten Türkçe)
-    """
-    try:
-        # Tüm bilgiler varsa geç
-        if data.get("orijinal_ad") and data.get("seri") and data.get("cevirmen"):
-            logger.info("ℹ️ Tüm bilgiler mevcut, 1000Kitap atlandı")
-            return data
-        
-        # Başlık yoksa çalışma
-        if not data.get("baslik"):
-            return data
-        
-        # Arama terimi oluştur
-        search_term = f"{data.get('baslik', '')} {data.get('yazar', '')}".strip()
-        
-        logger.info(f"🔍 1000Kitap'ta aranıyor: {search_term[:50]}...")
-        
-        scraper = self.scrapers['binkitap']
-        bk_result = await run_sync(scraper.search, search_term)
-        
-        if bk_result:
-            # Benzerlik kontrolü (yanlış kitap bulunmasın)
-            from utils.text_utils import benzerlik_orani
-            benzerlik = benzerlik_orani(
-                data.get('baslik', ''), 
-                bk_result.get('baslik', '')
-            )
-            
-            if benzerlik < 0.6:
-                logger.debug(f"⚠️ Düşük benzerlik ({benzerlik:.2f}), atlanıyor")
-                return data
-            
-            updated = False
-            
-            # Orijinal ad
-            if not data.get("orijinal_ad") and bk_result.get("orijinal_ad"):
-                data["orijinal_ad"] = bk_result["orijinal_ad"]
-                updated = True
-                logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
-            
-            # Çevirmen
-            if not data.get("cevirmen") and bk_result.get("cevirmen"):
-                data["cevirmen"] = bk_result["cevirmen"]
-                updated = True
-                logger.info(f"   ➕ Çevirmen: {data['cevirmen']}")
-            
-            # ➕ Seri (1000Kitap'tan gelen zaten Türkçe, öncelikli)
-            if not data.get("seri") and bk_result.get("seri"):
-                data["seri"] = bk_result["seri"]
-                updated = True
-                logger.info(f"   ➕ Seri: {data['seri']}")
-            
-            if updated:
-                logger.info("✅ 1000Kitap ile zenginleştirildi")
-            else:
-                logger.info("ℹ️ 1000Kitap'tan yeni bilgi eklenmedi")
-        else:
-            logger.debug("⚠️ 1000Kitap'ta sonuç bulunamadı")
-    
-    except Exception as e:
-        logger.error(f"❌ 1000Kitap zenginleştirme hatası: {e}")
-    
-    return data
 
 
-# Global instance
+# ========================================
+# 🎯 Singleton Instance (ÖNEMLİ!)
+# ========================================
 book_service = BookService()

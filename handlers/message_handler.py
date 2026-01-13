@@ -70,35 +70,76 @@ class MessageHandler:
         # Kitap bilgilerini ara
         bilgi = None
         kaynak = None
+        basarili = False
         
         # 1. Link varsa önce linkten ara
         if has_link and not sadece_dosya_adi:
             logger.info("🔗 Link bulundu, URL'den aranıyor...")
-            bilgi, kaynak, _ = await book_service.search_book(text, manuel_mod=True)
-        
-        # 2. Link yoksa veya linkten bulunamadıysa dosya adından ara
-        if not bilgi:
-            logger.info("📝 Dosya adından aranıyor...")
-            bilgi, kaynak, _ = await book_service.search_book(
-                message.file.name, 
-                manuel_mod=sadece_dosya_adi
+            bilgi, kaynak, basarili = await book_service.search_book(
+                text, 
+                manuel_mod=True  # Link aramasında zenginleştirme yapma
             )
         
-        # 3. Hiçbir şekilde bulunamadı
-        if not bilgi:
+        # 2. Link yoksa veya linkten bulunamadıysa dosya adından ara
+        if not basarili:
+            logger.info("📝 Dosya adından aranıyor...")
+            bilgi, kaynak, basarili = await book_service.search_book(
+                message.file.name,
+                #manuel_mod=sadece_dosya_adi  # Sadece dosya adı modunda zenginleştirme yapma
+            )
+        
+        # 3. Hiçbir şekilde bulunamadı - fallback veri oluştur
+        if not basarili or not bilgi:
             cls.stats["bulunamayan"] += 1
             logger.warning(f"❌ Bulunamadı: {message.file.name}")
-            bilgi = book_service.create_fallback_data(message.file.name)
+            
+            # Fallback veri oluştur
+            bilgi = cls._create_fallback_data(message.file.name)
             kaynak = "Otomatik (Dosya Adı)"
         else:
             cls.stats["bulunan"] += 1
-            
-            # Goodreads ile zenginleştir
-            if kaynak != "Goodreads":
-                bilgi = await book_service.enrich_with_goodreads(bilgi)
         
         # Mesajı düzenle
         await cls._edit_message(message, bilgi, kaynak, dosya_turu, durum)
+    
+    @classmethod
+    def _create_fallback_data(cls, dosya_adi: str) -> dict:
+        """
+        Kitap bulunamadığında dosya adından temel bilgiler çıkar
+        
+        Args:
+            dosya_adi: Dosya adı
+        
+        Returns:
+            Temel kitap bilgileri
+        """
+        import re
+        from utils.text_utils import temizle_dosya_adi
+        
+        # Dosya adını temizle
+        temiz_ad = temizle_dosya_adi(dosya_adi)
+        
+        # Yazar ve kitap adını ayırmaya çalış
+        # Format: "Yazar_Adi_Kitap_Adi.epub"
+        parcalar = temiz_ad.split('_', 1)
+        
+        if len(parcalar) >= 2:
+            yazar = parcalar[0].strip()
+            baslik = parcalar[1].strip()
+        else:
+            yazar = "Bilinmiyor"
+            baslik = temiz_ad
+        
+        # Sayı bilgilerini temizle (seri numaraları vs.)
+        baslik = re.sub(r'\b\d+\b', '', baslik).strip()
+        baslik = re.sub(r'\s+', ' ', baslik)
+        
+        return {
+            "baslik": baslik or "Bilinmeyen Kitap",
+            "yazar": yazar,
+            "aciklama": "Bu kitap hakkında bilgi bulunamadı. Dosya adından otomatik olarak oluşturulmuştur.",
+            "kaynak": "Otomatik (Dosya Adı)"
+        }
     
     @classmethod
     async def _edit_message(
@@ -124,14 +165,15 @@ class MessageHandler:
         metin = f"✍️ <b>Yazar:</b> {yazar}\n"
         metin += f"📖 <b>Kitap:</b> {baslik}\n"
         
-        # Seri bilgisi
+        # Orijinal ad (Goodreads/1000Kitap'tan gelebilir)
+        if bilgi.get("orijinal_ad"):
+            orijinal = html.escape(bilgi["orijinal_ad"])
+            metin += f"📝 <b>Orijinal Ad:</b> {orijinal}\n"        
+        
+        # Seri bilgisi (✅ Türkçeleştirilmiş)
         if bilgi.get("seri"):
             seri = html.escape(bilgi["seri"])
             metin += f"📚 <b>Seri:</b> {seri}\n"
-            
-        if bilgi.get("orijinal_ad"): metin += f"🔤 <b>Orijinal Adı:</b> {html.escape(bilgi['orijinal_ad'])}\n"       
-        if bilgi.get("cevirmen"): metin += f"🗣 <b>Çevirmen:</b> {html.escape(bilgi['cevirmen'])}\n"
-
         
         # Dosya bilgileri
         metin += f"📂 <b>Tür:</b> {dosya_turu}\n"
@@ -148,8 +190,17 @@ class MessageHandler:
         
         if bilgi.get("sayfa"):
             metin += f"📄 <b>Sayfa:</b> {bilgi['sayfa']}\n"
-        if bilgi.get("isbn"): metin += f"🔢 <b>ISBN:</b> {html.escape(bilgi['isbn'])}\n"
-        # Puan
+        
+        if bilgi.get("isbn"):
+            metin += f"🔢 <b>ISBN:</b> {html.escape(bilgi['isbn'])}\n"
+        
+        # Çevirmen (1000Kitap'tan gelebilir)
+        if bilgi.get("cevirmen"):
+            cevirmen = html.escape(bilgi["cevirmen"])
+            metin += f"🌍 <b>Çevirmen:</b> {cevirmen}\n"
+       
+        
+        # Puan (Goodreads'ten gelebilir)
         if bilgi.get("puan"):
             puan = bilgi["puan"]
             oy = bilgi.get("oy_sayisi", "")
@@ -158,7 +209,7 @@ class MessageHandler:
             else:
                 metin += f"⭐ <b>Puan:</b> {puan}/5\n"
         
-        # Türler
+        # Türler (Goodreads'ten gelebilir)
         if bilgi.get("turu"):
             metin += f"\n🏷 {bilgi['turu']}\n"
         
@@ -171,8 +222,6 @@ class MessageHandler:
             metin += f"\n🌐 <a href=\"{link}\">{kaynak}</a>"
         else:
             metin += f"\n🔍 <i>Kaynak: {kaynak}</i>"
-        
-
         
         # Mesajı düzenle
         try:

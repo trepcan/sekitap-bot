@@ -79,6 +79,15 @@ class BookService:
                     if self._validate_result(sonuc, temiz_ad, is_isbn, manuel_mod):
                         logger.info(f"✅ Bulundu: {name} - {sonuc.get('baslik')}")
                         
+                        # ⭐ ZENGİNLEŞTİRME (Yeni)
+                        # Goodreads ile zenginleştir (puan, tür, seri, orijinal ad)
+                        if key != 'goodreads':
+                            sonuc = await self.enrich_with_goodreads(sonuc)
+                        
+                        # Orijinal ad hala yoksa 1000Kitap'tan dene
+                        if not sonuc.get("orijinal_ad") and key != 'binkitap':
+                            sonuc = await self.enrich_with_binkitap(sonuc)
+                        
                         # Önbelleğe kaydet
                         if not manuel_mod and not is_isbn:
                             db.kaydet(temiz_ad, sonuc)
@@ -126,6 +135,15 @@ class BookService:
             result = await run_sync(scraper.search, None, direct_url=url)
             if result:
                 logger.info(f"✅ URL'den bulundu: {kaynak}")
+                
+                # ⭐ ZENGİNLEŞTİRME (Yeni)
+                # Goodreads dışındaki kaynaklardan geldiyse zenginleştir
+                if kaynak != "Goodreads":
+                    result = await self.enrich_with_goodreads(result)
+                    # Orijinal ad yoksa 1000Kitap dene
+                    if not result.get("orijinal_ad") and kaynak != "1000Kitap":
+                        result = await self.enrich_with_binkitap(result)
+                
                 return result, kaynak, None
         except Exception as e:
             logger.error(f"❌ URL arama hatası: {e}")
@@ -197,43 +215,141 @@ class BookService:
         isbn: str = None
     ) -> Dict[str, Any]:
         """
-        Goodreads ile zenginleştir (puan, tür, seri)
+        Goodreads ile zenginleştir (puan, tür, seri, orijinal ad)
         """
         try:
-            if not data.get("turu") or not data.get("puan"):
-                # ISBN varsa ISBN ile ara
-                if isbn or data.get("isbn"):
-                    search_term = isbn or data.get("isbn")
-                    is_isbn = True
-                else:
-                    # Başlık + yazar ile ara
-                    search_term = f"{data.get('baslik', '')} {data.get('yazar', '')}".strip()
-                    is_isbn = False
+            # Zenginleştirme gerekli mi kontrol et
+            needs_enrichment = (
+                not data.get("turu") or 
+                not data.get("puan") or 
+                not data.get("orijinal_ad")  # ➕ Yeni
+            )
+            
+            if not needs_enrichment:
+                return data
+            
+            # ISBN varsa ISBN ile ara
+            if isbn or data.get("isbn"):
+                search_term = isbn or data.get("isbn")
+                is_isbn = True
+            else:
+                # Başlık + yazar ile ara
+                search_term = f"{data.get('baslik', '')} {data.get('yazar', '')}".strip()
+                is_isbn = False
+            
+            if not search_term:
+                return data
+            
+            logger.info(f"🔍 Goodreads'te aranıyor: {search_term[:50]}...")
+            
+            scraper = self.scrapers['goodreads']
+            gr_result = await run_sync(
+                scraper.search, 
+                search_term, 
+                is_isbn_search=is_isbn
+            )
+            
+            if gr_result:
+                updated = False
                 
-                if search_term:
-                    scraper = self.scrapers['goodreads']
-                    gr_result = await run_sync(
-                        scraper.search, 
-                        search_term, 
-                        is_isbn_search=is_isbn
-                    )
-                    
-                    if gr_result:
-                        # Eksik alanları doldur
-                        if not data.get("turu") and gr_result.get("turu"):
-                            data["turu"] = gr_result["turu"]
-                        if not data.get("puan") and gr_result.get("puan"):
-                            data["puan"] = gr_result["puan"]
-                            data["oy_sayisi"] = gr_result.get("oy_sayisi")
-                        if not data.get("seri") and gr_result.get("seri"):
-                            data["seri"] = gr_result["seri"]
-                        if not data.get("aciklama") and gr_result.get("aciklama"):
-                            data["aciklama"] = gr_result["aciklama"]
-                        
-                        logger.info("✨ Goodreads ile zenginleştirildi")
+                # Orijinal ad ➕ (Yeni)
+                if not data.get("orijinal_ad") and gr_result.get("orijinal_ad"):
+                    data["orijinal_ad"] = gr_result["orijinal_ad"]
+                    updated = True
+                    logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
+                
+                # Tür
+                if not data.get("turu") and gr_result.get("turu"):
+                    data["turu"] = gr_result["turu"]
+                    updated = True
+                    logger.info(f"   ➕ Tür: {data['turu']}")
+                
+                # Puan
+                if not data.get("puan") and gr_result.get("puan"):
+                    data["puan"] = gr_result["puan"]
+                    data["oy_sayisi"] = gr_result.get("oy_sayisi")
+                    updated = True
+                    logger.info(f"   ➕ Puan: {data['puan']}")
+                
+                # Seri
+                if not data.get("seri") and gr_result.get("seri"):
+                    data["seri"] = gr_result["seri"]
+                    updated = True
+                    logger.info(f"   ➕ Seri: {data['seri']}")
+                
+                # Açıklama (zayıfsa güncelle)
+                if not data.get("aciklama") or len(data.get("aciklama", "")) < 25:
+                    if gr_result.get("aciklama") and len(gr_result["aciklama"]) > 25:
+                        data["aciklama"] = gr_result["aciklama"]
+                        updated = True
+                        logger.info("   ➕ Açıklama güncellendi")
+                
+                if updated:
+                    logger.info("✅ Goodreads ile zenginleştirildi")
+            else:
+                logger.debug("⚠️ Goodreads'te sonuç bulunamadı")
         
         except Exception as e:
             logger.error(f"❌ Goodreads zenginleştirme hatası: {e}")
+        
+        return data
+    
+    async def enrich_with_binkitap(
+        self, 
+        data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        1000Kitap ile zenginleştir (orijinal ad, çevirmen)
+        """
+        try:
+            # Orijinal ad zaten varsa geç
+            if data.get("orijinal_ad"):
+                return data
+            
+            # Başlık yoksa çalışma
+            if not data.get("baslik"):
+                return data
+            
+            # Arama terimi oluştur
+            search_term = f"{data.get('baslik', '')} {data.get('yazar', '')}".strip()
+            
+            logger.info(f"🔍 1000Kitap'ta aranıyor: {search_term[:50]}...")
+            
+            scraper = self.scrapers['binkitap']
+            bk_result = await run_sync(scraper.search, search_term)
+            
+            if bk_result:
+                # Benzerlik kontrolü (yanlış kitap bulunmasın)
+                benzerlik = benzerlik_orani(
+                    data.get('baslik', ''), 
+                    bk_result.get('baslik', '')
+                )
+                
+                if benzerlik < 0.6:
+                    logger.debug(f"⚠️ Düşük benzerlik ({benzerlik:.2f}), atlanıyor")
+                    return data
+                
+                updated = False
+                
+                # Orijinal ad
+                if not data.get("orijinal_ad") and bk_result.get("orijinal_ad"):
+                    data["orijinal_ad"] = bk_result["orijinal_ad"]
+                    updated = True
+                    logger.info(f"   ➕ Orijinal Ad: {data['orijinal_ad']}")
+                
+                # Çevirmen (bonus)
+                if not data.get("cevirmen") and bk_result.get("cevirmen"):
+                    data["cevirmen"] = bk_result["cevirmen"]
+                    updated = True
+                    logger.info(f"   ➕ Çevirmen: {data['cevirmen']}")
+                
+                if updated:
+                    logger.info("✅ 1000Kitap ile zenginleştirildi")
+            else:
+                logger.debug("⚠️ 1000Kitap'ta sonuç bulunamadı")
+        
+        except Exception as e:
+            logger.error(f"❌ 1000Kitap zenginleştirme hatası: {e}")
         
         return data
 

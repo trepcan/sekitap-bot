@@ -11,9 +11,10 @@ GURULTU_KELIMELERI = [
     # Mevcutlar
     "yayınları", "yayınevi", "yayıncılık", "yayın", "kitabevi",
     "bütün eserleri", "toplu eserler", "bls", "pdf", "epub", "okunmadı",
+    
     # --- Senin Verdiklerin ve Varyasyonları ---
     "cs", "[cs]", "-cs", "_cs", "okundu", "okunmadı", "_okundu", "v1", "v2", "v3",
-    "pdf", "epub", "mobi", "azw3", "yayınları", "yayınevi", "yayın", "kitabevi",
+    "pdf", "epub", "mobi", "azw3", "yayınları", "yayınevi", "yayın", "kitabevi", "_ham",
 
     # --- Dijital Arşiv Etiketleri (Release Tags) ---
     "indir", "download", "yandex", "drive", "cloud", "share", "full", "tam-metin",
@@ -23,7 +24,7 @@ GURULTU_KELIMELERI = [
     # --- Versiyon ve Düzenleme Notları ---
     "revised", "güncellenmiş", "genişletilmiş", "son", "final", "taslak", "draft",
     "copy", "kopya", "sample", "örnek", "demo", "preview", "tanıtım",
-    "v1.0", "v2.0", "new-edition", "edit", "edited", "düzeltilmiş",
+    "v1.0", "v2.0",  "v1", "v2",  "v3", "v4",  "new-edition", "edit", "edited", "düzeltilmiş",
 
     # --- Dil ve Çeviri Notları ---
     "tr", "eng", "en", "türkçe", "turkish", "çeviri", "cevirisi", "çev", "trans",
@@ -210,6 +211,8 @@ TUR_CEVIRI = {
     "Anthropology": "Antropoloji",
     "Literary Criticism": "EdebiEleştiri",
     "Social Justice": "SosyalAdalet",
+    "Language":"Dil",
+    "Medicine":"İlaç",
 
     # Formatlar ve Yaş Grupları
     "Childrens": "ÇocukKitapları",

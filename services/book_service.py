@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
+import re
 
 from scrapers.kitapyurdu import KitapyurduScraper
 from scrapers.goodreads import GoodreadsScraper
@@ -12,6 +13,7 @@ from scrapers.binkitap import BinKitapScraper
 from utils.async_utils import run_sync
 from utils.text_utils import metin_duzelt, benzerlik_orani
 from utils.series_utils import translate_series_name, prefer_turkish_series
+from config.constants import GURULTU_KELIMELERI
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,84 @@ class BookService:
             'binkitap': BinKitapScraper()
         }
         self.executor = ThreadPoolExecutor(max_workers=3)
+        
+        # Gürültü kelimelerini regex pattern'e çevir (performans için)
+        self._gurultu_pattern = self._create_noise_pattern()
+    
+    def _create_noise_pattern(self) -> re.Pattern:
+        """
+        Gürültü kelimelerinden tek bir regex pattern oluştur
+        - Case insensitive
+        - Kelime sınırları ile eşleşme
+        """
+        # Özel karakterleri escape et
+        escaped_words = [re.escape(word) for word in GURULTU_KELIMELERI]
+        
+        # Regex pattern'i oluştur: \b(word1|word2|word3)\b
+        pattern_str = r'\b(' + '|'.join(escaped_words) + r')\b'
+        
+        return re.compile(pattern_str, re.IGNORECASE | re.UNICODE)
+    
+    def _temizle_gurultu(self, text: str) -> str:
+        """
+        Metinden gürültü kelimelerini temizle
+        
+        Args:
+            text: Temizlenecek metin
+            
+        Returns:
+            str: Temizlenmiş metin
+        """
+        if not text:
+            return text
+        
+        # 1. Gürültü kelimelerini kaldır
+        temiz = self._gurultu_pattern.sub(' ', text)
+        
+        # 2. Yaygın ayırıcıları boşluğa çevir
+        temiz = re.sub(r'[_\-\.]+', ' ', temiz)
+        
+        # 3. Köşeli/normal parantez içindeki gürültüyü temizle
+        # Örnek: "[CS]", "(PDF)", "[Okundu]"
+        temiz = re.sub(r'\[([^\]]*)\]', lambda m: '' if self._is_noise(m.group(1)) else m.group(0), temiz)
+        temiz = re.sub(r'\(([^\)]*)\)', lambda m: '' if self._is_noise(m.group(1)) else m.group(0), temiz)
+        
+        # 4. Dosya uzantılarını kaldır
+        temiz = re.sub(r'\.(epub|pdf|mobi|azw3|djvu|txt)$', '', temiz, flags=re.IGNORECASE)
+        
+        # 5. Sayı+nokta formatını temizle (1. 2. 3.)
+        temiz = re.sub(r'\b\d+\.\s*', ' ', temiz)
+        
+        # 6. Çoklu boşlukları tek boşluğa indir
+        temiz = re.sub(r'\s+', ' ', temiz)
+        
+        return temiz.strip()
+    
+    def _is_noise(self, text: str) -> bool:
+        """
+        Verilen metnin tamamen gürültü olup olmadığını kontrol et
+        
+        Args:
+            text: Kontrol edilecek metin
+            
+        Returns:
+            bool: Gürültü ise True
+        """
+        if not text:
+            return True
+        
+        text_lower = text.lower().strip()
+        
+        # Boş veya çok kısa
+        if len(text_lower) < 2:
+            return True
+        
+        # Sadece sayı ve noktalama
+        if re.match(r'^[\d\s\.\-_]+$', text_lower):
+            return True
+        
+        # Gürültü kelimesi kontrolü
+        return text_lower in [g.lower() for g in GURULTU_KELIMELERI]
     
     async def search_book(
         self, 
@@ -39,15 +119,19 @@ class BookService:
         Returns:
             tuple: (kitap_bilgileri: dict|None, kaynak: str, basarili: bool)
         """
-        logger.info(f"🔎 Aranıyor: {query}")
+        logger.info(f"🔎 Aranıyor (ham): {query}")
+        
+        # Gürültü temizliği
+        temiz_query = self._temizle_gurultu(query)
+        logger.info(f"🧹 Temizlenmiş sorgu: {temiz_query}")
         
         try:
             # Kitapyurdu'da ara
-            kitapyurdu_data = await self._search_kitapyurdu(query, isbn)
+            kitapyurdu_data = await self._search_kitapyurdu(temiz_query, isbn)
             
             if not kitapyurdu_data:
-                logger.warning(f"❌ Hiçbir kaynakta bulunamadı: {query}")
-                return (None, "Yok", False)  # ← TUPLE!
+                logger.warning(f"❌ Hiçbir kaynakta bulunamadı: {temiz_query}")
+                return (None, "Yok", False)
             
             # Kaynak bilgisi
             kaynak = "Kitapyurdu"
@@ -58,21 +142,19 @@ class BookService:
             # Zenginleştirme
             if not manuel_mod:
                 enriched_data = await self._enrich_data(kitapyurdu_data)
-                return (enriched_data, kaynak, True)  # ← TUPLE!
+                return (enriched_data, kaynak, True)
             else:
                 logger.info("ℹ️ Manuel mod, zenginleştirme atlandı")
-                return (kitapyurdu_data, kaynak, True)  # ← TUPLE!
+                return (kitapyurdu_data, kaynak, True)
         
         except Exception as e:
             logger.error(f"❌ Arama hatası: {e}")
             import traceback
             traceback.print_exc()
-            return (None, "Hata", False)  # ← TUPLE!
-
+            return (None, "Hata", False)
 
     async def _search_kitapyurdu(self, query: str, isbn: str = None):
-        """Kitapyurdu'da akıllı arama - 5 aşamalı"""
-        import re
+        """Kitapyurdu'da akıllı arama - 6 aşamalı (gürültü temizlikli)"""
         
         scraper = self.scrapers.get('kitapyurdu')
         if not scraper:
@@ -92,55 +174,69 @@ class BookService:
         # Arama stratejileri listesi
         strategies = []
         
-        # 1️⃣ TAM SORGU
-        strategies.append(("Tam sorgu", query))
+        # 0️⃣ TEMİZ SORGU (Gürültü zaten temizlenmiş)
+        if query and len(query) >= 3:
+            strategies.append(("Temizlenmiş sorgu", query))
         
-        # 2️⃣ BASİTLEŞTİRİLMİŞ (uzantı, tire, alt çizgi temizlendi)
-        basit = re.sub(r'\.(epub|pdf)$', '', query, flags=re.IGNORECASE)
-        basit = basit.replace('_', ' ').replace(' - ', ' ')
-        basit = re.sub(r'\s+', ' ', basit).strip()
-        strategies.append(("Basit sorgu", basit))
-        
-        # 3️⃣ PARANTEZ İÇİ ÖNCELİKLİ
-        # "Rehine (Vanish)" → önce "Vanish", sonra "Rehine"
-        parantez_match = re.search(r'\(([^)]+)\)', basit)
+        # 1️⃣ PARANTEZ İÇİ ÖNCELİKLİ
+        # "Rehine (Vanish)" → "Vanish"
+        parantez_match = re.search(r'\(([^)]+)\)', query)
         if parantez_match:
             parantez_ici = parantez_match.group(1).strip()
             
-            # Yazar bilgisi varsa ekle
-            yazar_match = re.match(r'^([^\s]+(?:\s+[^\s]+)?)', basit)
-            if yazar_match:
-                yazar = yazar_match.group(1)
-                strategies.append(("Parantez içi + Yazar", f"{parantez_ici} {yazar}"))
+            if len(parantez_ici) >= 3 and not self._is_noise(parantez_ici):
+                # Yazar bilgisi varsa ekle
+                yazar_match = re.match(r'^([^\s]+(?:\s+[^\s]+)?)', query)
+                if yazar_match:
+                    yazar = yazar_match.group(1)
+                    strategies.append(("Parantez içi + Yazar", f"{parantez_ici} {yazar}"))
+                
+                strategies.append(("Parantez içi", parantez_ici))
+        
+        # 2️⃣ PARANTEZ DIŞI (orijinal başlık)
+        parantez_disindaki = re.sub(r'\([^)]*\)', '', query)
+        parantez_disindaki = re.sub(r'\s+', ' ', parantez_disindaki).strip()
+        
+        if parantez_disindaki and len(parantez_disindaki) >= 3:
+            strategies.append(("Parantez dışındaki", parantez_disindaki))
+        
+        # 3️⃣ SAYILARI KALDIR
+        sayisiz = re.sub(r'\b\d+\b', '', query)
+        sayisiz = re.sub(r'\s+', ' ', sayisiz).strip()
+        
+        if sayisiz != query and len(sayisiz) >= 3:
+            strategies.append(("Sayısız", sayisiz))
+        
+        # 4️⃣ NOKTALAMA TEMİZLE
+        noktalama_temiz = re.sub(r'[^\wğüşıöçĞÜŞİÖÇ\s]', ' ', query)
+        noktalama_temiz = re.sub(r'\s+', ' ', noktalama_temiz).strip()
+        
+        if noktalama_temiz != query and len(noktalama_temiz) >= 3:
+            strategies.append(("Noktalama temiz", noktalama_temiz))
+        
+        # 5️⃣ İLK 2-3 KELİME (genelde yazar + kitap adı)
+        kelimeler = query.split()
+        if len(kelimeler) >= 2:
+            ilk_iki = ' '.join(kelimeler[:2])
+            if len(ilk_iki) >= 5:
+                strategies.append(("İlk 2 kelime", ilk_iki))
             
-            strategies.append(("Parantez içi", parantez_ici))
+            if len(kelimeler) >= 3:
+                ilk_uc = ' '.join(kelimeler[:3])
+                strategies.append(("İlk 3 kelime", ilk_uc))
         
-        # 4️⃣ SADECE KİTAP ADI (sayılar ve özel karakterler temizlendi)
-        temiz = re.sub(r'[^\wğüşıöçĞÜŞİÖÇ\s]', ' ', basit)
-        temiz = re.sub(r'\b\d+\b', '', temiz)  # Sayıları kaldır
-        temiz = re.sub(r'\s+', ' ', temiz).strip()
-        
-        # Parantezi de temizle
-        temiz_parantez = re.sub(r'\([^)]*\)', '', temiz)
-        temiz_parantez = re.sub(r'\s+', ' ', temiz_parantez).strip()
-        
-        if temiz_parantez != temiz:
-            strategies.append(("Parantez temizlendi", temiz_parantez))
-        
-        strategies.append(("Temiz sorgu", temiz))
-        
-        # 5️⃣ SADECE SON İKİ KELİME (genelde kitap adı)
-        kelimeler = temiz.split()
+        # 6️⃣ SON 2 KELİME (genelde kitap adı)
         if len(kelimeler) >= 2:
             son_iki = ' '.join(kelimeler[-2:])
-            strategies.append(("Son 2 kelime", son_iki))
+            if len(son_iki) >= 5:
+                strategies.append(("Son 2 kelime", son_iki))
         
         # Her stratejiyi dene
         for index, (strateji_adi, sorgu) in enumerate(strategies, 1):
             if not sorgu or len(sorgu) < 3:
                 continue
             
-            logger.info(f"🔍 [{index}/{len(strategies)}] {strateji_adi}: {sorgu[:60]}...")
+            logger.info(f"🔍 [{index}/{len(strategies)}] {strateji_adi}: '{sorgu[:60]}...'")
             
             try:
                 result = await run_sync(scraper.search, sorgu)
@@ -372,8 +468,6 @@ class BookService:
     def close(self):
         """Kaynakları temizle"""
         self.executor.shutdown(wait=False)
-
-
 
 
 # ========================================

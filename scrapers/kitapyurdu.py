@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Any
 from urllib.parse import quote_plus
 import logging
+import re
 
 from scrapers.base_scraper import BaseScraper
 from parsers.data_parser import DataParser
@@ -18,14 +19,87 @@ class KitapyurduScraper(BaseScraper):
     def get_name(self) -> str:
         return "Kitapyurdu"
     
+    def fetch_by_url(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Verilen URL'den direkt kitap bilgilerini çek (arama yapmadan)
+        
+        Args:
+            url: Kitap detay sayfası URL'si
+            
+        Returns:
+            Dict veya None
+        """
+        try:
+            logger.info(f"🔗 Direkt URL'den çekiliyor: {url[:80]}...")
+            
+            response = self.get_response(url, use_scraper=False)
+            if not response:
+                logger.error("❌ URL'den yanıt alınamadı")
+                return None
+            
+            # Encoding ayarla
+            try:
+                html_content = response.content.decode('utf-8')
+            except:
+                html_content = response.content.decode('iso-8859-9', errors='replace')
+            
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Direkt parse et
+            return self._parse_detail_page(soup, url)
+            
+        except Exception as e:
+            logger.error(f"❌ Kitapyurdu fetch_by_url hatası: {e}")
+            return None
+    
+    def fetch_by_id(self, book_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Kitap ID'si ile direkt kitap bilgilerini çek
+        
+        Args:
+            book_id: Kitapyurdu kitap ID'si (örn: "82977")
+            
+        Returns:
+            Dict veya None
+        """
+        # ID'den URL oluştur (slug kısmı "-" olabilir, yönlendirme yapılır)
+        url = f"{self.BASE_URL}/kitap/-/{book_id}.html"
+        return self.fetch_by_url(url)
+    
+    @staticmethod
+    def extract_id_from_url(url: str) -> Optional[str]:
+        """
+        URL'den kitap ID'sini çıkar
+        
+        Örnek: 
+            https://www.kitapyurdu.com/kitap/pratik-rusca-konusma-kilavuzu/82977.html
+            -> "82977"
+        """
+        if not url:
+            return None
+        
+        # Pattern: /kitap/herhangi-slug/12345.html
+        match = re.search(r'/kitap/[^/]+/(\d+)\.html', url)
+        if match:
+            return match.group(1)
+        
+        # Alternatif: sadece sayı.html
+        match = re.search(r'/(\d+)\.html', url)
+        if match:
+            return match.group(1)
+        
+        return None
+    
     def search(self, query: str, direct_url: str = None) -> Optional[Dict[str, Any]]:
         """Kitapyurdu'da arama yap"""
         try:
+            # Direct URL verilmişse direkt fetch et
             if direct_url:
-                url = direct_url
-            else:
-                encoded_query = quote_plus(query)
-                url = f"{self.BASE_URL}/index.php?route=product/search&filter_name={encoded_query}"
+                return self.fetch_by_url(direct_url)
+            
+            encoded_query = quote_plus(query)
+            url = f"{self.BASE_URL}/index.php?route=product/search&filter_name={encoded_query}"
             
             response = self.get_response(url, use_scraper=False)
             if not response:
@@ -40,25 +114,21 @@ class KitapyurduScraper(BaseScraper):
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # Direkt URL değilse ilk sonucu bul
-            if not direct_url:
-                ilk_kitap = soup.select_one('.product-cr')
-                if not ilk_kitap:
-                    return None
-                
-                link = ilk_kitap.select_one('a')['href']
-                
-                # Detay sayfasını çek
-                detay_res = self.session.get(link, timeout=self.timeout)
-                try:
-                    html_detay = detay_res.content.decode('utf-8')
-                except:
-                    html_detay = detay_res.content.decode('iso-8859-9', errors='replace')
-                
-                detay_soup = BeautifulSoup(html_detay, 'html.parser')
-            else:
-                link = url
-                detay_soup = soup
+            # İlk sonucu bul
+            ilk_kitap = soup.select_one('.product-cr')
+            if not ilk_kitap:
+                return None
+            
+            link = ilk_kitap.select_one('a')['href']
+            
+            # Detay sayfasını çek
+            detay_res = self.session.get(link, timeout=self.timeout)
+            try:
+                html_detay = detay_res.content.decode('utf-8')
+            except:
+                html_detay = detay_res.content.decode('iso-8859-9', errors='replace')
+            
+            detay_soup = BeautifulSoup(html_detay, 'html.parser')
             
             return self._parse_detail_page(detay_soup, link)
             

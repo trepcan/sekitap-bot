@@ -1,6 +1,9 @@
+"""Telegram mesaj işleyici"""
+
 import asyncio
 import html
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 from telethon.errors import MessageNotModifiedError
@@ -27,6 +30,39 @@ class MessageHandler:
         "son_islem_zamani": datetime.now()
     }
     
+    @staticmethod
+    def _extract_url(text: str) -> Optional[str]:
+        """Metinden URL'yi çıkar (Markdown link formatını öncelik verir)"""
+        if not text:
+            return None
+        
+        # 1. Markdown link formatı: [text](url)
+        markdown_match = re.search(r'\[([^\]]*)\]\(([^)]+)\)', text)
+        if markdown_match:
+            url = markdown_match.group(2).strip()
+            if 'kitapyurdu.com' in url:
+                logger.debug(f"📎 Markdown link tespit edildi: {url[:70]}")
+                return url
+        
+        # 2. Kitapyurdu URL (tam format)
+        url_match = re.search(
+            r'https?://(?:www\.)?kitapyurdu\.com/kitap/[^/\s)]+/\d+\.html',
+            text
+        )
+        if url_match:
+            url = url_match.group(0)
+            logger.debug(f"📎 Kitapyurdu URL tespit edildi: {url[:70]}")
+            return url
+        
+        # 3. Genel HTTPS URL
+        general_match = re.search(r'https?://[^\s)]+', text)
+        if general_match:
+            url = general_match.group(0)
+            logger.debug(f"📎 Genel URL tespit edildi: {url[:70]}")
+            return url
+        
+        return None
+    
     @classmethod
     async def process_message(
         cls, 
@@ -52,7 +88,7 @@ class MessageHandler:
         logger.info(f"📄 İşleniyor: {message.file.name}")
         
         # Mesaj metnini al
-        text = message.text or ""
+        text = message.raw_text or ""
         
         # Bot imzası kontrolü
         bot_imzasi = ("Kitap adı:" in text or "✍️" in text or "📖" in text)
@@ -74,18 +110,23 @@ class MessageHandler:
         
         # 1. Link varsa önce linkten ara
         if has_link and not sadece_dosya_adi:
-            logger.info("🔗 Link bulundu, URL'den aranıyor...")
-            bilgi, kaynak, basarili = await book_service.search_book(
-                text, 
-                manuel_mod=True  # Link aramasında zenginleştirme yapma
-            )
+            direct_url = cls._extract_url(text)
+            if direct_url:
+                logger.info(f"🔗 Link bulundu: {direct_url[:70]}...")
+                bilgi, kaynak, basarili = await book_service.search_book(
+                    query="",
+                    direct_url=direct_url,
+                    manuel_mod=True
+                )
+            else:
+                logger.warning("⚠️ Link bulundu ama parse edilemedi")
         
         # 2. Link yoksa veya linkten bulunamadıysa dosya adından ara
         if not basarili:
             logger.info("📝 Dosya adından aranıyor...")
             bilgi, kaynak, basarili = await book_service.search_book(
-                message.file.name,
-                #manuel_mod=sadece_dosya_adi  # Sadece dosya adı modunda zenginleştirme yapma
+                query=message.file.name,
+                manuel_mod=False
             )
         
         # 3. Hiçbir şekilde bulunamadı - fallback veri oluştur
@@ -93,7 +134,6 @@ class MessageHandler:
             cls.stats["bulunamayan"] += 1
             logger.warning(f"❌ Bulunamadı: {message.file.name}")
             
-            # Fallback veri oluştur
             bilgi = cls._create_fallback_data(message.file.name)
             kaynak = "Otomatik (Dosya Adı)"
         else:
@@ -104,23 +144,10 @@ class MessageHandler:
     
     @classmethod
     def _create_fallback_data(cls, dosya_adi: str) -> dict:
-        """
-        Kitap bulunamadığında dosya adından temel bilgiler çıkar
-        
-        Args:
-            dosya_adi: Dosya adı
-        
-        Returns:
-            Temel kitap bilgileri
-        """
-        import re
+        """Kitap bulunamadığında dosya adından temel bilgiler çıkar"""
         from utils.text_utils import temizle_dosya_adi
         
-        # Dosya adını temizle
         temiz_ad = temizle_dosya_adi(dosya_adi)
-        
-        # Yazar ve kitap adını ayırmaya çalış
-        # Format: "Yazar_Adi_Kitap_Adi.epub"
         parcalar = temiz_ad.split('_', 1)
         
         if len(parcalar) >= 2:
@@ -130,14 +157,13 @@ class MessageHandler:
             yazar = "Bilinmiyor"
             baslik = temiz_ad
         
-        # Sayı bilgilerini temizle (seri numaraları vs.)
         baslik = re.sub(r'\b\d+\b', '', baslik).strip()
         baslik = re.sub(r'\s+', ' ', baslik)
         
         return {
             "baslik": baslik or "Bilinmeyen Kitap",
             "yazar": yazar,
-            "aciklama": "Bu kitap hakkında bilgi bulunamadı. Dosya adından otomatik olarak oluşturulmuştur.",
+            "aciklama": "Bu kitap hakkında bilgi bulunamadı.",
             "kaynak": "Otomatik (Dosya Adı)"
         }
     
@@ -151,35 +177,28 @@ class MessageHandler:
         durum: str
     ):
         """Mesajı formatla ve düzenle"""
-        # HTML escape
         baslik = html.escape(bilgi.get("baslik") or "Bilinmiyor")
         yazar = html.escape(bilgi.get("yazar") or "Bilinmiyor")
         
-        # Açıklama (maksimum 3000 karakter)
         aciklama_raw = bilgi.get("aciklama") or "Açıklama bulunamadı."
         if len(aciklama_raw) > 3000:
             aciklama_raw = aciklama_raw[:2997] + "..."
         ozet = html.escape(aciklama_raw)
         
-        # Mesaj formatı
         metin = f"✍️ <b>Yazar:</b> {yazar}\n"
         metin += f"📖 <b>Kitap:</b> {baslik}\n"
         
-        # Orijinal ad (Goodreads/1000Kitap'tan gelebilir)
         if bilgi.get("orijinal_ad"):
             orijinal = html.escape(bilgi["orijinal_ad"])
             metin += f"📝 <b>Orijinal Ad:</b> {orijinal}\n"        
         
-        # Seri bilgisi (✅ Türkçeleştirilmiş)
         if bilgi.get("seri"):
             seri = html.escape(bilgi["seri"])
             metin += f"📚 <b>Seri:</b> {seri}\n"
         
-        # Dosya bilgileri
         metin += f"📂 <b>Tür:</b> {dosya_turu}\n"
         metin += f"📊 <b>Durum:</b> {durum}\n"
         
-        # Yayın bilgileri
         if bilgi.get("yayinevi"):
             yayinevi = html.escape(bilgi["yayinevi"])
             metin += f"🏢 <b>Yayınevi:</b> {yayinevi}\n"
@@ -194,13 +213,10 @@ class MessageHandler:
         if bilgi.get("isbn"):
             metin += f"🔢 <b>ISBN:</b> {html.escape(bilgi['isbn'])}\n"
         
-        # Çevirmen (1000Kitap'tan gelebilir)
         if bilgi.get("cevirmen"):
             cevirmen = html.escape(bilgi["cevirmen"])
             metin += f"🌍 <b>Çevirmen:</b> {cevirmen}\n"
-       
         
-        # Puan (Goodreads'ten gelebilir)
         if bilgi.get("puan"):
             puan = bilgi["puan"]
             oy = bilgi.get("oy_sayisi", "")
@@ -209,21 +225,17 @@ class MessageHandler:
             else:
                 metin += f"⭐ <b>Puan:</b> {puan}/5\n"
         
-        # Türler (Goodreads'ten gelebilir)
         if bilgi.get("turu"):
             metin += f"\n🏷 {bilgi['turu']}\n"
         
-        # Açıklama
         metin += f"\nℹ️ <b>Açıklama:</b>\n<blockquote>{ozet}</blockquote>\n"
         
-        # Link ve kaynak
         if bilgi.get("link"):
             link = html.escape(bilgi["link"])
             metin += f"\n🌐 <a href=\"{link}\">{kaynak}</a>"
         else:
             metin += f"\n🔍 <i>Kaynak: {kaynak}</i>"
         
-        # Mesajı düzenle
         try:
             await message.edit(
                 text=metin, 
@@ -233,13 +245,6 @@ class MessageHandler:
             logger.info(f"✅ Güncellendi: {baslik} ({kaynak})")
         
         except MessageNotModifiedError:
-            logger.debug("⚠️ Mesaj zaten aynı, değişiklik yapılmadı")
-        
+            logger.debug("⚠️ Mesaj zaten aynı")
         except Exception as e:
             logger.error(f"❌ Mesaj düzenleme hatası: {e}")
-            # Fallback: Basit format
-            try:
-                basit_metin = f"✍️ {yazar} - {baslik}\n\n{ozet}"
-                await message.edit(text=basit_metin, link_preview=False)
-            except:
-                logger.error("❌ Basit format da başarısız")

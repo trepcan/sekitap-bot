@@ -1,31 +1,32 @@
-```markdown
+
 # 📚 Sekitap Bot
 
 Telegram kanallarındaki PDF ve EPUB kitaplarını otomatik olarak tanımlayan, kitap bilgilerini Kitapyurdu, Goodreads ve 1000Kitap'tan çekip mesajlara ekleyen akıllı bot.
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
-![Telethon](https://img.shields.io/badge/Telethon-1.34+-green.svg)
-![License](https://img.shields.io/badge/license-MIT-orange.svg)
-
----
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)  
+![Telethon](https://img.shields.io/badge/Telethon-1.34+-green.svg)  
+![License](https://img.shields.io/badge/license-MIT-orange.svg)  
 
 ## 🎯 Özellikler
 
+
 ### 📖 Kitap Tanıma ve Zenginleştirme
+```
 - ✅ **Otomatik Kitap Tespiti**: PDF ve EPUB dosyalarını otomatik algılar
 - ✅ **Çoklu Kaynak Desteği**: Kitapyurdu, Goodreads, 1000Kitap
 - ✅ **Akıllı Arama**: 5 aşamalı arama algoritması ile yüksek bulma oranı
 - ✅ **Zenginleştirme**: ISBN, puan, seri bilgisi, orijinal ad, çevirmen
 - ✅ **Fallback Mekanizması**: Bulunamayan kitaplar için dosya adından bilgi çıkarma
-
+```
 ### 🤖 Otomasyon
+
 - ✅ **Eski Mesajları Tarama**: Kanaldaki tüm eski mesajları geriye dönük işleyebilir
 - ✅ **Yeni Mesajları İzleme**: Yeni eklenen kitapları anında işler
 - ✅ **Zorla Güncelleme**: Zaten işlenmiş mesajları tekrar güncelleyebilir
 - ✅ **İstatistik Takibi**: İşlenen, bulunan, bulunamayan kitap sayıları
 
-### 📊 Detaylı Bilgiler
 ```
+### 📊 Detaylı Bilgiler
 ✍️ Yazar: C. S. Lewis  
 📖 Kitap: Narnia Günlükleri 3 / At ve Çocuk  
 📚 Seri: Narnia Günlükleri #3  

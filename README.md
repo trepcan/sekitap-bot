@@ -168,29 +168,29 @@ Bot aşağıdaki durumlarda otomatik olarak çalışır:
 
 ```
 sekitap_bot/
-├── 📄 main.py                 # Ana uygulama ve event handler'lar
-├── 📁 config/                 # Konfigürasyon dosyaları
+├── 📄 main.py                # Ana uygulama ve event handler'lar
+├── 📁 config/                # Konfigürasyon dosyaları
 │   ├── 🔧 settings.py        # Bot ayarları ve ortam değişkenleri
 │   └── 📋 constants.py       # Sabitler ve veri kalıpları
 ├── 📁 database/              # Veritabanı yönetimi
-│   └── 🗄️ db_manager.py    # SQLite önbellek sistemi
+│   └── 🗄️ db_manager.py      # SQLite önbellek sistemi
 ├── 📁 scrapers/              # Web scraping modülleri
-│   ├── 🔍 base_scraper.py  # Temel scraper sınıfı
-│   ├── 📚 binkitap.py      # 1000Kitap scraper
-│   ├── 🛒 kitapyurdu.py    # Kitapyurdu scraper
-│   ├── 🌟 goodreads.py     # Goodreads scraper
+│   ├── 🔍 base_scraper.py    # Temel scraper sınıfı
+│   ├── 📚 binkitap.py        # 1000Kitap scraper
+│   ├── 🛒 kitapyurdu.py      # Kitapyurdu scraper
+│   ├── 🌟 goodreads.py       # Goodreads scraper
 ├── 📁 services/              # İş mantığı katmanı
-│   └── 📋 book_service.py  # Kitap arama ve veri işleme
+│   └── 📋 book_service.py    # Kitap arama ve veri işleme
 ├── 📁 handlers/              # Telegram event handler'ları
 │   ├── 💬 message_handler.py # Mesaj işleme mantığı
 │   └── 👑 admin_handler.py   # Admin komutları
 ├── 📁 parsers/               # Veri ayrıştırıcılar
-│   └── 🔍 data_parser.py   # HTML/JSON parsing
+│   └── 🔍 data_parser.py     # HTML/JSON parsing
 ├── 📁 utils/                 # Yardımcı araçlar
-│   ├── 📝 text_utils.py    # Metin işleme fonksiyonları
-│   └── 🔧 helpers.py       # Genel yardımcı fonksiyonlar
+│   ├── 📝 text_utils.py      # Metin işleme fonksiyonları
+│   └── 🔧 helpers.py         # Genel yardımcı fonksiyonlar
 └── 📁 tests/                 # Test dosyaları
-    └── 🧪 test_scrapers.py # Scraper testleri
+    └── 🧪 test_scrapers.py   # Scraper testleri
 ```
 
 ## 🔧 Geliştirici Rehberi

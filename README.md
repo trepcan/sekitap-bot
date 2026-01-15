@@ -329,8 +329,5 @@ Bu proje **MIT Lisansı** altında lisanslanmıştır. Detaylar için [LICENSE](
 
 ---
 
-<<<<<<< HEAD
-**Not**: Bu bot eğitim ve kişisel kullanım amaçlıdır. Web scraping işlemleri sırasında ilgili sitelerin kullanım koşullarına ve robots.txt dosyalarına saygı gösterin.
 =======
 **Not**: Bu bot eğitim ve kişisel kullanım amaçlıdır. Web scraping işlemleri sırasında ilgili sitelerin kullanım koşullarına ve robots.txt dosyalarına saygı gösterin.
->>>>>>> 3fff826ebf79d25f516537a87be63f59e3106f39

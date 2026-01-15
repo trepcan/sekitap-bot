@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Açıklama uzunluk limitleri (Telegram premium hesap yoksa 600 karakter ideal değerdir.)
+ACIKLAMA_MAX_LENGTH = 3000
+ACIKLAMA_KISALTMA_LENGTH = 2997
+
 if sys.platform.startswith('win'):
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -14,7 +18,7 @@ if sys.platform.startswith('win'):
 
 
 class Settings:
-    SURUM = "v9.0 (Modüler Mimari)"
+    SURUM = "v9.3 (Modüler Mimari & Minor Updates)"
     API_ID: int = int(os.getenv('TELEGRAM_API_ID', 0))
     API_HASH: str = os.getenv('TELEGRAM_API_HASH', '')
     

@@ -11,7 +11,7 @@ from telethon.errors import MessageNotModifiedError
 from services.book_service import book_service
 from database.db_manager import db
 from utils.text_utils import durum_belirle
-from config.settings import settings
+from config.settings import settings, ACIKLAMA_MAX_LENGTH, ACIKLAMA_KISALTMA_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +181,8 @@ class MessageHandler:
         yazar = html.escape(bilgi.get("yazar") or "Bilinmiyor")
         
         aciklama_raw = bilgi.get("aciklama") or "Açıklama bulunamadı."
-        if len(aciklama_raw) > 3000:
-            aciklama_raw = aciklama_raw[:2997] + "..."
+        if len(aciklama_raw) > ACIKLAMA_MAX_LENGTH:
+            aciklama_raw = aciklama_raw[:ACIKLAMA_KISALTMA_LENGTH] + "..."
         ozet = html.escape(aciklama_raw)
         
         metin = f"✍️ <b>Yazar:</b> {yazar}\n"

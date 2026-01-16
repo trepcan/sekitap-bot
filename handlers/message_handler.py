@@ -10,12 +10,18 @@ import re
 import time
 from datetime import datetime
 from typing import Optional, Tuple, Dict, Any
-from telethon.errors import MessageNotModifiedError, FloodWaitError
+from telethon.errors import (
+    MessageNotModifiedError, 
+    FloodWaitError,
+    MessageIdInvalidError,
+    ChatAdminRequiredError,
+    MessageAuthorRequiredError
+)
 
 from services.book_service import book_service
 from database.db_manager import db
 from utils.text_utils import durum_belirle, temizle_dosya_adi
-from utils.statistics import bot_stats  # YENİ
+from utils.statistics import bot_stats
 from config.settings import settings, ACIKLAMA_MAX_LENGTH, ACIKLAMA_KISALTMA_LENGTH
 
 logger = logging.getLogger(__name__)
@@ -38,6 +44,10 @@ class MessageHandler:
     # Cache (son işlenen mesajlar)
     _cache = {}
     _cache_max_size = 100
+    
+    # Elle düzenlenen mesajlar (bot tarafından yeniden yazılmayacak)
+    _manual_edits = {}  # {message_id: last_edit_time}
+    _manual_edit_cooldown = 300  # 5 dakika
     
     @staticmethod
     def _extract_url(text: str) -> Optional[str]:
@@ -81,6 +91,41 @@ class MessageHandler:
         return None
     
     @classmethod
+    def _is_manually_edited(cls, message_id: int) -> bool:
+        """
+        Mesajın elle düzenlendi mi kontrol et
+        
+        Args:
+            message_id: Mesaj ID'si
+            
+        Returns:
+            True eğer yakın zamanda elle düzenlenmişse
+        """
+        if message_id not in cls._manual_edits:
+            return False
+        
+        last_edit = cls._manual_edits[message_id]
+        elapsed = time.time() - last_edit
+        
+        # Cooldown süresi geçmişse forget et
+        if elapsed > cls._manual_edit_cooldown:
+            del cls._manual_edits[message_id]
+            return False
+        
+        return True
+    
+    @classmethod
+    def _mark_manual_edit(cls, message_id: int):
+        """
+        Mesajı elle düzenlendi olarak işaretle
+        
+        Args:
+            message_id: Mesaj ID'si
+        """
+        cls._manual_edits[message_id] = time.time()
+        logger.info(f"📝 Mesaj elle düzenlendi olarak işaretlendi: {message_id}")
+    
+    @classmethod
     def _should_skip_message(
         cls, 
         message, 
@@ -101,13 +146,19 @@ class MessageHandler:
         if not (dosya_adi.endswith('.pdf') or dosya_adi.endswith('.epub')):
             return True, "Desteklenmeyen format"
         
+        # Elle düzenlenen mesajlar güncelleme cooldown süresi içindeyse atla
+        if cls._is_manually_edited(message.id):
+            logger.info(f"⏩ Elle düzenlenen mesaj atlandı (cooldown): {message.id}")
+            return True, "Elle düzenlendi (cooldown)"
+        
         # Bot imzası kontrolü
         bot_imzasi = ("Kitap adı:" in text or "✍️" in text or "📖" in text)
         has_link = "http" in text
         
         # Zaten işlenmiş ve zorla güncelleme yoksa atla
-        if bot_imzasi and not zorla_guncelle and not has_link:
-            return True, "Zaten işlenmiş"
+        if bot_imzasi and not zorla_guncelle:
+            logger.info(f"⏭️ Zaten işlenmiş mesaj atlanıyor (elle düzenlenmiş olabilir)")
+        return True, "Zaten işlenmiş - dokunma!"
         
         return False, ""
     
@@ -151,6 +202,41 @@ class MessageHandler:
         return None
     
     @classmethod
+    def _clear_cache_for_message(cls, message_id: int):
+        """Belirli bir mesajın cache'ini temizle"""
+        if message_id in cls._cache:
+            del cls._cache[message_id]
+            logger.info(f"🗑️ Cache temizlendi: {message_id}")
+    
+    @classmethod
+    async def _verify_message_exists(cls, message) -> bool:
+        """
+        Mesajın hala var olup olmadığını kontrol et
+        
+        Args:
+            message: Telethon mesaj objesi
+            
+        Returns:
+            True eğer mesaj varsa, False yoksa
+        """
+        try:
+            fresh_message = await message.client.get_messages(
+                message.peer_id,
+                ids=message.id
+            )
+            if fresh_message:
+                logger.debug(f"✅ Mesaj doğrulandı: {message.id}")
+                return True
+            else:
+                logger.warning(f"⚠️ Mesaj bulunamadı (ID: {message.id})")
+                bot_stats.increment("mesaj_silinmis")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Mesaj doğrulama hatası: {e}")
+            return True
+    
+    @classmethod
     async def process_message(
         cls, 
         message, 
@@ -184,7 +270,7 @@ class MessageHandler:
             
             logger.info(f"📄 İşleniyor: {message.file.name}")
             
-            # Cache kontrolü
+            # Cache kontrolü (zorla güncelleme değilse)
             cached_data = cls._get_from_cache(message.id) if not zorla_guncelle else None
             if cached_data:
                 logger.info("💾 Cache'den yüklendi")
@@ -231,7 +317,6 @@ class MessageHandler:
             logger.warning(f"⏳ Rate limit: {e.seconds}s bekleniyor...")
             bot_stats.increment("rate_limit_sayisi")
             await asyncio.sleep(e.seconds)
-            # Tekrar dene
             await cls.process_message(message, zorla_guncelle, sadece_dosya_adi)
             
         except Exception as e:
@@ -256,7 +341,6 @@ class MessageHandler:
         kaynak = None
         basarili = False
         
-        # API çağrısı sayacı
         bot_stats.increment("toplam_api_cagrisi")
         
         try:
@@ -303,7 +387,6 @@ class MessageHandler:
             logger.error(f"❌ Arama hatası: {e}", exc_info=True)
             bot_stats.increment("basarisiz_api")
             
-            # Fallback
             bilgi = cls._create_fallback_data(message.file.name)
             kaynak = "Otomatik (Hata)"
             return bilgi, kaynak, False
@@ -329,7 +412,6 @@ class MessageHandler:
             yazar = "Bilinmiyor"
             baslik = temiz_ad
         
-        # Sayıları temizle
         baslik = re.sub(r'\b\d+\b', '', baslik).strip()
         baslik = re.sub(r'\s+', ' ', baslik)
         
@@ -361,6 +443,11 @@ class MessageHandler:
             durum: Kitap durumu
             max_retries: Maksimum deneme sayısı
         """
+        if not await cls._verify_message_exists(message):
+            logger.warning(f"⚠️ Mesaj düzenleme iptal edildi (mesaj yok): {message.id}")
+            bot_stats.increment("mesaj_duzenlenemedi")
+            return
+        
         for attempt in range(max_retries):
             try:
                 await cls._edit_message(message, bilgi, kaynak, dosya_turu, durum)
@@ -369,25 +456,52 @@ class MessageHandler:
                 
             except MessageNotModifiedError:
                 logger.debug("⚠️ Mesaj zaten aynı")
+                bot_stats.increment("mesaj_zaten_ayni")
+                return
+            
+            except MessageIdInvalidError:
+                logger.error(f"❌ Geçersiz mesaj ID (deneme {attempt+1}/{max_retries}): {message.id}")
+                bot_stats.increment("gecersiz_mesaj_id")
+                
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+                    if not await cls._verify_message_exists(message):
+                        logger.warning("⚠️ Mesaj silinmiş, düzenleme sonlandırılıyor")
+                        bot_stats.increment("mesaj_silinmis")
+                        return
+                else:
+                    logger.error("❌ Mesaj ID geçersiz, düzenleme başarısız")
+                    bot_stats.increment("basarisiz_mesaj_duzenleme")
+            
+            except ChatAdminRequiredError:
+                logger.error("❌ Admin yetkisi gerekli, mesaj düzenlenemedi")
+                bot_stats.increment("admin_yetkisi_yok")
+                return
+            
+            except MessageAuthorRequiredError:
+                logger.error("❌ Mesaj sahibi değil, düzenleme yapılamadı")
+                bot_stats.increment("sahip_degil")
                 return
                 
             except FloodWaitError as e:
                 if attempt < max_retries - 1:
                     logger.warning(f"⏳ Rate limit (deneme {attempt+1}/{max_retries}): {e.seconds}s")
-                    await asyncio.sleep(e.seconds)
+                    await asyncio.sleep(min(e.seconds, 60))
                     continue
                 else:
+                    logger.error(f"❌ Rate limit aşıldı")
+                    bot_stats.increment("basarisiz_mesaj_duzenleme")
                     raise
                     
             except Exception as e:
                 if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
                     logger.warning(f"⚠️ Düzenleme hatası (deneme {attempt+1}/{max_retries}): {e}")
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    await asyncio.sleep(wait_time)
                     continue
                 else:
                     logger.error(f"❌ Mesaj düzenleme başarısız: {e}", exc_info=True)
                     bot_stats.increment("basarisiz_mesaj_duzenleme")
-                    raise
     
     @classmethod
     async def _edit_message(
@@ -400,37 +514,31 @@ class MessageHandler:
     ):
         """
         Mesajı formatla ve düzenle
-        
-        Args:
-            message: Telethon mesaj objesi
-            bilgi: Kitap bilgileri
-            kaynak: Bilgi kaynağı
-            dosya_turu: PDF veya EPUB
-            durum: Kitap durumu
         """
-        # HTML escape
-        baslik = html.escape(bilgi.get("baslik") or "Bilinmiyor")
-        yazar = html.escape(bilgi.get("yazar") or "Bilinmiyor")
-        
-        # Açıklama kısaltma
-        aciklama_raw = bilgi.get("aciklama") or "Açıklama bulunamadı."
-        if len(aciklama_raw) > ACIKLAMA_MAX_LENGTH:
-            aciklama_raw = aciklama_raw[:ACIKLAMA_KISALTMA_LENGTH] + "..."
-        ozet = html.escape(aciklama_raw)
-        
-        # Mesaj metni oluştur
-        metin = cls._format_message_text(
-            bilgi, baslik, yazar, ozet, dosya_turu, durum, kaynak
-        )
-        
-        # Mesajı düzenle
-        await message.edit(
-            text=metin, 
-            parse_mode='html', 
-            link_preview=False
-        )
-        
-        logger.info(f"✅ Güncellendi: {baslik} ({kaynak})")
+        try:
+            baslik = html.escape(bilgi.get("baslik") or "Bilinmiyor")
+            yazar = html.escape(bilgi.get("yazar") or "Bilinmiyor")
+            
+            aciklama_raw = bilgi.get("aciklama") or "Açıklama bulunamadı."
+            if len(aciklama_raw) > ACIKLAMA_MAX_LENGTH:
+                aciklama_raw = aciklama_raw[:ACIKLAMA_KISALTMA_LENGTH] + "..."
+            ozet = html.escape(aciklama_raw)
+            
+            metin = cls._format_message_text(
+                bilgi, baslik, yazar, ozet, dosya_turu, durum, kaynak
+            )
+            
+            await message.edit(
+                text=metin, 
+                parse_mode='html', 
+                link_preview=False
+            )
+            
+            logger.info(f"✅ Güncellendi: {baslik} ({kaynak})")
+            
+        except ValueError as e:
+            logger.error(f"❌ Format hatası: {e}")
+            raise
     
     @classmethod
     def _format_message_text(
@@ -443,16 +551,10 @@ class MessageHandler:
         durum: str,
         kaynak: str
     ) -> str:
-        """
-        Mesaj metnini formatla
-        
-        Returns:
-            HTML formatında mesaj metni
-        """
+        """Mesaj metnini formatla"""
         metin = f"✍️ <b>Yazar:</b> {yazar}\n"
         metin += f"📖 <b>Kitap:</b> {baslik}\n"
         
-        # Opsiyonel alanlar
         if bilgi.get("orijinal_ad"):
             orijinal = html.escape(bilgi["orijinal_ad"])
             metin += f"📝 <b>Orijinal Ad:</b> {orijinal}\n"        
@@ -495,7 +597,6 @@ class MessageHandler:
         
         metin += f"\nℹ️ <b>Açıklama:</b>\n<blockquote>{ozet}</blockquote>\n"
         
-        # Kaynak linki
         if bilgi.get("link"):
             link = html.escape(bilgi["link"])
             metin += f"\n🌐 <a href=\"{link}\">{kaynak}</a>"
@@ -512,15 +613,7 @@ class MessageHandler:
         kaynak: str,
         basarili: bool
     ):
-        """
-        Kitap bilgilerini veritabanına kaydet
-        
-        Args:
-            message: Telethon mesaj objesi
-            bilgi: Kitap bilgileri
-            kaynak: Bilgi kaynağı
-            basarili: Arama başarılı mı?
-        """
+        """Kitap bilgilerini veritabanına kaydet"""
         try:
             await db.kitap_ekle(
                 dosya_adi=message.file.name,
@@ -540,12 +633,7 @@ class MessageHandler:
     
     @classmethod
     def get_stats(cls) -> dict:
-        """
-        İstatistikleri al
-        
-        Returns:
-            İstatistik dictionary
-        """
+        """İstatistikleri al"""
         return cls.stats.copy()
     
     @classmethod

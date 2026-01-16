@@ -304,7 +304,7 @@ Bu proje **MIT Lisansı** altında lisanslanmıştır. Detaylar için [LICENSE](
 
 **Proje**: sEkitap Bot v9.3  
 **Mimari**: Modüler Asenkron Tasarım  
-**Versiyon**: 9.3  
+**Versiyon**: 9.4  
 **Son Güncelleme**: 2026
 
 📧 **İletişim**: [seyhanyuksel@gmail.com](mailto:seyhanyuksel@gmail.com)  

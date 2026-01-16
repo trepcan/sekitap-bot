@@ -128,9 +128,9 @@ ZORLA_GUNCELLEME_MODU=false
 BENZERLIK_ORANI=0.35          # Benzerlik eşiği (0-1)
 KELIME_ESLESME_ORANI=0.65     # Kelime eşleşme oranı
 CACHE_TTL=168                 # Önbellek süresi (saat)
-MAX_LOG_BOYUTU_MB=5          # Maksimum log dosya boyutu
-REQUEST_TIMEOUT=15           # HTTP istek zaman aşımı
-RATE_LIMIT_DELAY=0.5         # Rate limiting gecikmesi
+MAX_LOG_BOYUTU_MB=5           # Maksimum log dosya boyutu
+REQUEST_TIMEOUT=15            # HTTP istek zaman aşımı
+RATE_LIMIT_DELAY=0.5          # Rate limiting gecikmesi
 ```
 
 ## 🎮 Kullanım Kılavuzu
@@ -329,5 +329,4 @@ Bu proje **MIT Lisansı** altında lisanslanmıştır. Detaylar için [LICENSE](
 
 ---
 
-=======
 **Not**: Bu bot eğitim ve kişisel kullanım amaçlıdır. Web scraping işlemleri sırasında ilgili sitelerin kullanım koşullarına ve robots.txt dosyalarına saygı gösterin.

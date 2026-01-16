@@ -4,7 +4,9 @@ Admin komutları
 import os
 import logging
 from datetime import datetime
-
+from utils.logger import logger
+from utils.decorators import log_handler
+from utils.statistics import bot_stats
 from config.settings import settings
 from database.db_manager import db
 
@@ -121,3 +123,32 @@ class AdminHandler:
         
         except Exception as e:
             await event.reply(f"❌ Hata: {e}")
+            
+    @log_handler
+    async def stats_command(update, context):
+        """İstatistikleri göster"""
+        logger.info("Stats komutu çağrıldı")
+        
+        report = stats.get_report()
+        await update.message.reply_text(report)
+
+    @log_handler 
+    async def logs_command(update, context):
+        """Son logları göster (sadece admin)"""
+        user_id = update.effective_user.id
+        
+        if user_id not in config.ADMIN_IDS:
+            logger.warning(f"Yetkisiz log erişimi: {user_id}")
+            await update.message.reply_text("❌ Bu komutu kullanma yetkiniz yok!")
+            return
+        
+        # Son 10 log satırını gönder
+        try:
+            with open('logs/bot.log', 'r', encoding='utf-8') as f:
+                logs = f.readlines()[-10:]
+            
+            await update.message.reply_text(
+                "📝 Son Loglar:\n\n" + "".join(logs)
+            )
+        except Exception as e:
+            logger.error(f"Log okuma hatası: {e}")            

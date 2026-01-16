@@ -1,9 +1,8 @@
 """
 sEkitap Bot - Ana Uygulama
-Modüler Mimari v9.0
+Modüler Mimari v9.5 - Stats Entegrasyonlu
 """
 import asyncio
-import logging
 import sys
 from datetime import datetime
 from telethon import TelegramClient, events
@@ -12,53 +11,65 @@ from telethon.errors import MessageNotModifiedError
 from config.settings import settings
 from handlers.message_handler import MessageHandler
 from handlers.admin_handler import AdminHandler
-
-# Logging konfigürasyonu
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+from utils.logger import logger  # Tek logger yeterli
+from utils.statistics import bot_stats  # Yeni stats sistemi
 
 # Telethon client
 client = TelegramClient('user_oturumu', settings.API_ID, settings.API_HASH)
 
 
+# ==================== MESAJ İŞLEYİCİLERİ ====================
+
 @client.on(events.NewMessage(chats=settings.HEDEF_KANALLAR))
 async def yeni_mesaj_handler(event):
     """Yeni mesaj geldiğinde"""
-    MessageHandler.stats["islem_tipi"] = "Canlı Mod"
-    logger.info(f"🔔 Yeni Mesaj (Kanal ID: {event.chat_id})")
-    await MessageHandler.process_message(event.message)
+    try:
+        bot_stats.set("islem_tipi", "Canlı Mod")
+        bot_stats.increment("toplam_mesaj")
+        bot_stats.set("son_islem_zamani", datetime.now().isoformat())
+        
+        logger.info(f"🔔 Yeni Mesaj (Kanal ID: {event.chat_id})")
+        await MessageHandler.process_message(event.message)
+        
+        bot_stats.increment("basarili")
+        
+    except Exception as e:
+        logger.error(f"❌ Yeni mesaj işleme hatası: {e}", exc_info=True)
+        bot_stats.increment("basarisiz")
 
 
 @client.on(events.MessageEdited(chats=settings.HEDEF_KANALLAR))
 async def duzenlenen_mesaj_handler(event):
     """Mesaj düzenlendiğinde"""
-    text = event.message.text or ""
-    
-    # Zaten bot tarafından düzenlenmişse ve link yoksa atla
-    if ("✍️" in text or "Kitap adı:" in text or "📖" in text) and "http" not in text:
-        logger.debug("⏩ Bot mesajı, atlanıyor")
-        return
-    
-    # Link varsa ve eski açıklama da varsa, sadece linki al
-    if "http" in text and ("✍️" in text or "Kitap adı:" in text):
-        import re
-        match = re.search(r'(https?://\S+)', text)
-        if match:
-            saf_link = match.group(1).strip()
-            event.message.message = saf_link
-            event.message.entities = []
-            logger.info(f"♻️ Link Enjekte Edildi: {saf_link}")
-    
-    MessageHandler.stats["islem_tipi"] = "Canlı Mod (Düzenleme)"
-    logger.info(f"🔔 Düzenleme Algılandı (Kanal ID: {event.chat_id})")
-    await MessageHandler.process_message(event.message, zorla_guncelle=True)
+    try:
+        text = event.message.text or ""
+        
+        # Zaten bot tarafından düzenlenmişse ve link yoksa atla
+        if ("✍️" in text or "Kitap adı:" in text or "📖" in text) and "http" not in text:
+            logger.debug("⏩ Bot mesajı, atlanıyor")
+            return
+        
+        # Link varsa ve eski açıklama da varsa, sadece linki al
+        if "http" in text and ("✍️" in text or "Kitap adı:" in text):
+            import re
+            match = re.search(r'(https?://\S+)', text)
+            if match:
+                saf_link = match.group(1).strip()
+                event.message.message = saf_link
+                event.message.entities = []
+                logger.info(f"♻️ Link Enjekte Edildi: {saf_link}")
+        
+        bot_stats.set("islem_tipi", "Canlı Mod (Düzenleme)")
+        bot_stats.increment("toplam_duzenleme")
+        
+        logger.info(f"🔔 Düzenleme Algılandı (Kanal ID: {event.chat_id})")
+        await MessageHandler.process_message(event.message, zorla_guncelle=True)
+        
+        bot_stats.increment("basarili")
+        
+    except Exception as e:
+        logger.error(f"❌ Düzenleme işleme hatası: {e}", exc_info=True)
+        bot_stats.increment("basarisiz")
 
 
 # ==================== ADMIN KOMUTLARI ====================
@@ -66,37 +77,88 @@ async def duzenlenen_mesaj_handler(event):
 @client.on(events.NewMessage(pattern='/admin'))
 async def admin_help_handler(event):
     """Admin yardım komutu"""
+    if not await _admin_check(event):
+        return
     await AdminHandler.admin_help(event, client)
 
 
 @client.on(events.NewMessage(pattern='/durum'))
 async def durum_handler(event):
     """Durum komutu"""
+    if not await _admin_check(event):
+        return
     await AdminHandler.durum(event, client)
 
 
 @client.on(events.NewMessage(pattern='/ping'))
 async def ping_handler(event):
     """Ping komutu"""
+    if not await _admin_check(event):
+        return
     await AdminHandler.ping(event, client)
 
 
 @client.on(events.NewMessage(pattern='/dbbilgi'))
 async def dbbilgi_handler(event):
     """Veritabanı bilgi komutu"""
+    if not await _admin_check(event):
+        return
     await AdminHandler.dbbilgi(event, client)
 
 
 @client.on(events.NewMessage(pattern='/sonkayitlar'))
 async def sonkayitlar_handler(event):
     """Son kayıtlar komutu"""
+    if not await _admin_check(event):
+        return
     await AdminHandler.sonkayitlar(event, client)
 
 
 @client.on(events.NewMessage(pattern='/logtemizle'))
 async def logtemizle_handler(event):
     """Log temizleme komutu"""
+    if not await _admin_check(event):
+        return
     await AdminHandler.logtemizle(event, client)
+
+
+@client.on(events.NewMessage(pattern='/stats'))
+async def stats_handler(event):
+    """İstatistik komutu"""
+    if not await _admin_check(event):
+        return
+    
+    try:
+        report = bot_stats.get_report()
+        await event.respond(report)
+        logger.info("📊 Stats raporu gönderildi")
+    except Exception as e:
+        logger.error(f"Stats raporu hatası: {e}", exc_info=True)
+        await event.respond("❌ Stats raporu oluşturulamadı!")
+
+
+@client.on(events.NewMessage(pattern='/statsreset'))
+async def stats_reset_handler(event):
+    """İstatistikleri sıfırla"""
+    if not await _admin_check(event):
+        return
+    
+    try:
+        bot_stats.reset()
+        await event.respond("✅ İstatistikler sıfırlandı!")
+        logger.info("📊 Stats sıfırlandı")
+    except Exception as e:
+        logger.error(f"Stats sıfırlama hatası: {e}", exc_info=True)
+        await event.respond("❌ Sıfırlama başarısız!")
+
+
+async def _admin_check(event) -> bool:
+    """Admin yetkisi kontrol et"""
+    if event.sender_id != settings.ADMIN_ID:
+        await event.respond("⛔ Bu komutu kullanma yetkiniz yok!")
+        logger.warning(f"⚠️ Yetkisiz komut denemesi: {event.sender_id}")
+        return False
+    return True
 
 
 # ==================== GEÇMİŞ TARAMA ====================
@@ -109,10 +171,13 @@ async def gecmis_tarama(zorla_modu: bool = False):
     logger.info(f"Zorla Güncelleme: {'Açık' if zorla_modu else 'Kapalı'}")
     logger.info(f"{'='*60}\n")
     
-    MessageHandler.stats["islem_tipi"] = "Geçmiş Taraması"
+    bot_stats.set("islem_tipi", "Geçmiş Taraması")
+    tarama_baslangic = datetime.now()
     
     # Biraz bekle (bot tam açılsın)
     await asyncio.sleep(2)
+    
+    toplam_islem = 0
     
     for kanal_id in settings.HEDEF_KANALLAR:
         kanal_adi = settings.KANAL_ISIMLERI.get(kanal_id, f"Kanal {kanal_id}")
@@ -146,13 +211,19 @@ async def gecmis_tarama(zorla_modu: bool = False):
                     if "http" not in text:
                         use_filename_only = True
                 
-                await MessageHandler.process_message(
-                    mesaj,
-                    zorla_guncelle=zorla_modu,
-                    sadece_dosya_adi=use_filename_only
-                )
-                
-                sayac += 1
+                try:
+                    await MessageHandler.process_message(
+                        mesaj,
+                        zorla_guncelle=zorla_modu,
+                        sadece_dosya_adi=use_filename_only
+                    )
+                    sayac += 1
+                    toplam_islem += 1
+                    bot_stats.increment("gecmis_tarama_sayac")
+                    
+                except Exception as e:
+                    logger.error(f"   ⚠️ Mesaj işleme hatası: {e}")
+                    bot_stats.increment("gecmis_tarama_hata")
                 
                 # Rate limit
                 await asyncio.sleep(1)
@@ -160,14 +231,20 @@ async def gecmis_tarama(zorla_modu: bool = False):
             logger.info(f"   ✅ {kanal_adi}: {sayac} mesaj işlendi")
         
         except Exception as e:
-            logger.error(f"   ⚠️ Hata ({kanal_adi}): {e}")
+            logger.error(f"   ⚠️ Kanal hatası ({kanal_adi}): {e}", exc_info=True)
             continue
+    
+    tarama_suresi = (datetime.now() - tarama_baslangic).total_seconds()
     
     logger.info(f"\n{'='*60}")
     logger.info("✅ GEÇMİŞ TARAMASI TAMAMLANDI!")
+    logger.info(f"   📊 Toplam İşlem: {toplam_islem}")
+    logger.info(f"   ⏱️  Süre: {tarama_suresi:.1f} saniye")
     logger.info(f"{'='*60}\n")
     
-    MessageHandler.stats["islem_tipi"] = "Canlı Bekleme Modu"
+    bot_stats.set("islem_tipi", "Canlı Bekleme Modu")
+    bot_stats.set("son_tarama_zamani", datetime.now().isoformat())
+    bot_stats.set("son_tarama_islem_sayisi", toplam_islem)
 
 
 # ==================== ANA FONKSİYON ====================
@@ -181,28 +258,42 @@ async def main():
     
     logger.info(f"\n{'='*60}")
     logger.info(f"🚀 sEkitap Bot Başlatılıyor...")
-    logger.info(f"Sürüm: {settings.SURUM}")
+    logger.info(f"   Sürüm: {settings.SURUM}")
+    logger.info(f"   Başlatma: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"{'='*60}\n")
     
+    # Stats'ı başlat
+    bot_stats.set("baslangic_zamani", datetime.now().isoformat())
+    bot_stats.set("surum", settings.SURUM)
+    
     # Client'ı başlat
-    await client.start()
+    try:
+        await client.start()
+    except Exception as e:
+        logger.error(f"❌ Client başlatma hatası: {e}", exc_info=True)
+        sys.exit(1)
     
     # Bot bilgileri
-    me = await client.get_me()
-    logger.info(f"👤 Giriş Yapıldı: {me.first_name}")
-    logger.info(f"📱 Telefon: +{me.phone}")
-    logger.info(f"🔗 Kullanıcı Adı: @{me.username if me.username else 'Yok'}")
-    logger.info(f"\n📡 İzlenen Kanallar: {len(settings.HEDEF_KANALLAR)} adet")
+    try:
+        me = await client.get_me()
+        logger.info(f"👤 Giriş Yapıldı: {me.first_name}")
+        logger.info(f"📱 Telefon: +{me.phone}")
+        if me.username:
+            logger.info(f"🔗 Kullanıcı Adı: @{me.username}")
+        logger.info("")
+    except Exception as e:
+        logger.error(f"⚠️ Kullanıcı bilgileri alınamadı: {e}")
     
+    # Kanal bilgileri
+    logger.info(f"📡 İzlenen Kanallar: {len(settings.HEDEF_KANALLAR)} adet")
     for kanal_id in settings.HEDEF_KANALLAR:
         kanal_adi = settings.KANAL_ISIMLERI.get(kanal_id, f"Kanal {kanal_id}")
         logger.info(f"   • {kanal_adi} ({kanal_id})")
-    
     logger.info("")
     
     # Admin bilgileri
     if settings.ADMIN_ID:
-        logger.info(f"👑 Admin: {settings.ADMIN_ID}")
+        logger.info(f"👑 Admin ID: {settings.ADMIN_ID}")
     else:
         logger.warning("⚠️  Admin ID ayarlanmamış!")
     
@@ -217,7 +308,12 @@ async def main():
     else:
         logger.info("ℹ️  Geçmiş tarama kapalı\n")
     
-    logger.info("👂 Canlı mod aktif. Yeni mesajlar bekleniyor...\n")
+    logger.info("👂 Canlı mod aktif. Yeni mesajlar bekleniyor...")
+    logger.info("💡 Admin komutları için /admin yazın\n")
+    
+    # İlk stats
+    logger.info(f"📊 İstatistikler başlatıldı")
+    logger.info(f"   Stats dosyası: logs/stats.json\n")
     
     # Sürekli çalış
     await client.run_until_disconnected()
@@ -228,9 +324,8 @@ if __name__ == '__main__':
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("\n\n👋 Bot durduruldu (Keyboard Interrupt)")
+        logger.info(f"📊 Son Stats:\n{bot_stats.get_report()}")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"\n\n❌ Kritik hata: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"\n\n❌ Kritik hata: {e}", exc_info=True)
         sys.exit(1)

@@ -14,9 +14,9 @@ build/
 .env
 *.session
 *.session-journal
-kitap_onbellek.db
+*.db
 log.txt
-bot.log
+*.log
 
 # IDE
 .vscode/

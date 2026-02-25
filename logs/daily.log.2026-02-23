@@ -1,0 +1,109 @@
+2026-02-23 08:37:59 - sekitap_bot - [32mINFO[0m - main.py:286 - 
+============================================================
+2026-02-23 08:37:59 - sekitap_bot - [32mINFO[0m - main.py:287 - 🚀 sEkitap Bot Başlatılıyor...
+2026-02-23 08:37:59 - sekitap_bot - [32mINFO[0m - main.py:288 -    Sürüm: v9.3 (Modüler Mimari & Minor Updates)
+2026-02-23 08:37:59 - sekitap_bot - [32mINFO[0m - main.py:289 -    Başlatma: 2026-02-23 08:37:59
+2026-02-23 08:37:59 - sekitap_bot - [32mINFO[0m - main.py:290 - ============================================================
+
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:306 - 👤 Giriş Yapıldı: Isaac
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:307 - 📱 Telefon: +905497826319
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:309 - 🔗 Kullanıcı Adı: @SeyhanY
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:310 - 
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:315 - 📡 İzlenen Kanallar: 1 adet
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:318 -    • sEkitap Arşivi (-1003184032013)
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:319 - 
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:323 - 👑 Admin ID: 629746621
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:327 - 
+============================================================
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:328 - 🚀 BOT AKTİF!
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:329 - ============================================================
+
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:336 - ℹ️ Geçmiş tarama kapalı
+
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:338 - 👂 Canlı mod aktif. Yeni mesajlar bekleniyor...
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:339 - 💡 Admin komutları için /admin yazın
+
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:342 - 📊 İstatistikler başlatıldı
+2026-02-23 08:38:00 - sekitap_bot - [32mINFO[0m - main.py:343 -    Stats dosyası: logs/stats.json
+
+2026-02-23 09:00:24 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 09:00:24 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 09:00:35 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 09:02:55 - sekitap_bot - [31mERROR[0m - main.py:360 - 
+
+❌ Kritik hata: Connection to Telegram failed 5 time(s)
+Traceback (most recent call last):
+  File "C:\Users\seyha\OneDrive\Desktop\Python Çalışmalarım\Kitapbot\enyenibot\main.py", line 354, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "C:\Python314\Lib\asyncio\runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "C:\Python314\Lib\asyncio\runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Python314\Lib\asyncio\base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "C:\Users\seyha\OneDrive\Desktop\Python Çalışmalarım\Kitapbot\enyenibot\main.py", line 349, in main
+    await client.run_until_disconnected()
+  File "C:\Users\seyha\AppData\Roaming\Python\Python314\site-packages\telethon\client\updates.py", line 490, in _keepalive_loop
+    await asyncio.wait_for(
+        self.disconnected, timeout=60
+    )
+  File "C:\Python314\Lib\asyncio\tasks.py", line 488, in wait_for
+    return await fut
+           ^^^^^^^^^
+ConnectionError: Connection to Telegram failed 5 time(s)
+2026-02-23 09:05:44 - sekitap_bot - [32mINFO[0m - main.py:286 - 
+============================================================
+2026-02-23 09:05:44 - sekitap_bot - [32mINFO[0m - main.py:287 - 🚀 sEkitap Bot Başlatılıyor...
+2026-02-23 09:05:44 - sekitap_bot - [32mINFO[0m - main.py:288 -    Sürüm: v9.3 (Modüler Mimari & Minor Updates)
+2026-02-23 09:05:44 - sekitap_bot - [32mINFO[0m - main.py:289 -    Başlatma: 2026-02-23 09:05:44
+2026-02-23 09:05:44 - sekitap_bot - [32mINFO[0m - main.py:290 - ============================================================
+
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:306 - 👤 Giriş Yapıldı: Isaac
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:307 - 📱 Telefon: +905497826319
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:309 - 🔗 Kullanıcı Adı: @SeyhanY
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:310 - 
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:315 - 📡 İzlenen Kanallar: 1 adet
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:318 -    • sEkitap Arşivi (-1003184032013)
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:319 - 
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:323 - 👑 Admin ID: 629746621
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:327 - 
+============================================================
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:328 - 🚀 BOT AKTİF!
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:329 - ============================================================
+
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:336 - ℹ️ Geçmiş tarama kapalı
+
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:338 - 👂 Canlı mod aktif. Yeni mesajlar bekleniyor...
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:339 - 💡 Admin komutları için /admin yazın
+
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:342 - 📊 İstatistikler başlatıldı
+2026-02-23 09:05:45 - sekitap_bot - [32mINFO[0m - main.py:343 -    Stats dosyası: logs/stats.json
+
+2026-02-23 09:06:06 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 10:53:37 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 10:53:44 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 10:54:44 - sekitap_bot - [32mINFO[0m - main.py:59 - 📝 Mesaj düzenlendi: 9213
+2026-02-23 10:54:44 - sekitap_bot - [32mINFO[0m - main.py:60 -    Dosya: Elif Şafak - Gökyüzünde Nehirler Var_okunmadı.epub
+2026-02-23 10:54:44 - sekitap_bot - [32mINFO[0m - main.py:61 -    Kanal ID: -1003184032013
+2026-02-23 10:54:44 - sekitap_bot - [32mINFO[0m - main.py:67 - 🔗 Link bulundu, işleniyor: 9213
+2026-02-23 11:21:18 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 11:21:18 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 11:21:24 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 11:22:19 - sekitap_bot - [32mINFO[0m - main.py:59 - 📝 Mesaj düzenlendi: 9216
+2026-02-23 11:22:19 - sekitap_bot - [32mINFO[0m - main.py:60 -    Dosya: Bülent_Somay_Fantazi,_Bilimkurgu_ve_Başka_Meseleler_v1.epub
+2026-02-23 11:22:19 - sekitap_bot - [32mINFO[0m - main.py:61 -    Kanal ID: -1003184032013
+2026-02-23 11:22:19 - sekitap_bot - [32mINFO[0m - main.py:67 - 🔗 Link bulundu, işleniyor: 9216
+2026-02-23 14:19:50 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 14:19:55 - sekitap_bot - [32mINFO[0m - main.py:32 - 🔔 Yeni Mesaj (Kanal ID: -1003184032013)
+2026-02-23 14:20:48 - sekitap_bot - [32mINFO[0m - main.py:59 - 📝 Mesaj düzenlendi: 9218
+2026-02-23 14:20:48 - sekitap_bot - [32mINFO[0m - main.py:60 -    Dosya: Julie Clark - Son Uçuş_okunmadı.epub
+2026-02-23 14:20:48 - sekitap_bot - [32mINFO[0m - main.py:61 -    Kanal ID: -1003184032013
+2026-02-23 14:20:48 - sekitap_bot - [32mINFO[0m - main.py:67 - 🔗 Link bulundu, işleniyor: 9218
+2026-02-23 20:08:01 - sekitap_bot - [32mINFO[0m - main.py:59 - 📝 Mesaj düzenlendi: 9207
+2026-02-23 20:08:01 - sekitap_bot - [32mINFO[0m - main.py:60 -    Dosya: Nedim_Gürsel_Yalnızlığın_Yarattığı_Yazar_Sait_Faik.epub
+2026-02-23 20:08:01 - sekitap_bot - [32mINFO[0m - main.py:61 -    Kanal ID: -1003184032013
+2026-02-23 20:08:01 - sekitap_bot - [32mINFO[0m - main.py:67 - 🔗 Link bulundu, işleniyor: 9207

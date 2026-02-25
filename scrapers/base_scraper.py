@@ -48,8 +48,19 @@ class BaseScraper(ABC):
     
     @abstractmethod
     def search(self, query: str, direct_url: str = None) -> Optional[Dict[str, Any]]:
-        pass
+        """
+        Arama yap
+        
+        Args:
+            query: Arama sorgusu
+            direct_url: Varsa direkt URL (isteğe bağlı)
+            
+        Returns:
+            Kitap bilgileri dict'i veya None
+        """
+        ...
     
     @abstractmethod
     def get_name(self) -> str:
-        pass
+        """Scraper adını döndür"""
+        ...

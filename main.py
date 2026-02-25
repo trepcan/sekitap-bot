@@ -10,9 +10,10 @@ from telethon.errors import MessageNotModifiedError
 
 from config.settings import settings
 from handlers.message_handler import MessageHandler
+from handlers.edit_handler import register_edit_handlers
 from handlers.admin_handler import AdminHandler
-from utils.logger import logger  # Tek logger yeterli
-from utils.statistics import bot_stats  # Yeni stats sistemi
+from utils.logger import logger
+from utils.statistics import bot_stats
 
 # Telethon client
 client = TelegramClient('user_oturumu', settings.API_ID, settings.API_HASH)
@@ -42,35 +43,53 @@ async def yeni_mesaj_handler(event):
 async def duzenlenen_mesaj_handler(event):
     """Mesaj düzenlendiğinde"""
     try:
-        text = event.message.text or ""
+        message = event.message
         
-        # Zaten bot tarafından düzenlenmişse ve link yoksa atla
-        if ("✍️" in text or "Kitap adı:" in text or "📖" in text) and "http" not in text:
-            logger.debug("⏩ Bot mesajı, atlanıyor")
+        # Dosya kontrolü
+        if not message.file or not message.file.name:
             return
         
-        # Link varsa ve eski açıklama da varsa, sadece linki al
-        if "http" in text and ("✍️" in text or "Kitap adı:" in text):
-            import re
-            match = re.search(r'(https?://\S+)', text)
-            if match:
-                saf_link = match.group(1).strip()
-                event.message.message = saf_link
-                event.message.entities = []
-                logger.info(f"♻️ Link Enjekte Edildi: {saf_link}")
+        dosya_adi = message.file.name.lower()
+        if not (dosya_adi.endswith('.pdf') or dosya_adi.endswith('.epub')):
+            return
+        
+        msg_id = message.id
+        text = message.raw_text or ""
+        
+        logger.info(f"📝 Mesaj düzenlendi: {msg_id}")
+        logger.info(f"   Dosya: {message.file.name}")
+        logger.info(f"   Kanal ID: {event.chat_id}")
+        
+        # Link var mı kontrol et
+        has_link = "http" in text
+        
+        if has_link:
+            logger.info(f"🔗 Link bulundu, işleniyor: {msg_id}")
+            # Link varsa HEMEN işle, protect etme!
+            await MessageHandler.process_message(message, zorla_guncelle=True)
+            bot_stats.increment("basarili")
+            return
+        
+        # Link yoksa, elle düzenleme olarak protect et
+        bot_imzasi = ("✍️" in text or "📖" in text or "📂 <b>Tür:</b>" in text)
+        
+        if bot_imzasi:
+            # Bot tarafından yazılan mesaj elle düzeltilmiş
+            logger.info(f"🛡️ Elle düzeltilen bot mesajı korunuyor: {msg_id}")
+            MessageHandler._protect_message(msg_id)
+            MessageHandler._clear_cache_for_message(msg_id)
+            logger.info(f"🛡️ Mesaj korundu ve cache temizlendi: {msg_id}")
+        else:
+            # Normal mesaj
+            logger.info(f"ℹ️ Normal mesaj düzeltme: {msg_id}")
         
         bot_stats.set("islem_tipi", "Canlı Mod (Düzenleme)")
         bot_stats.increment("toplam_duzenleme")
-        
-        logger.info(f"🔔 Düzenleme Algılandı (Kanal ID: {event.chat_id})")
-        await MessageHandler.process_message(event.message, zorla_guncelle=True)
-        
         bot_stats.increment("basarili")
         
     except Exception as e:
         logger.error(f"❌ Düzenleme işleme hatası: {e}", exc_info=True)
         bot_stats.increment("basarisiz")
-
 
 # ==================== ADMIN KOMUTLARI ====================
 
@@ -163,12 +182,15 @@ async def _admin_check(event) -> bool:
 
 # ==================== GEÇMİŞ TARAMA ====================
 
-async def gecmis_tarama(zorla_modu: bool = False):
-    """Geçmiş mesajları tara"""
+async def gecmis_tarama(zorla_guncelle: bool = False):
+    """
+    Geçmiş mesajları tara
+    Protect kontrol ile - elle yapılan düzeltmeleri koruyor
+    """
     logger.info(f"\n{'='*60}")
     logger.info(f"⏳ GEÇMİŞ TARAMA BAŞLATILIYOR...")
-    logger.info(f"Sürüm: {settings.SURUM}")
-    logger.info(f"Zorla Güncelleme: {'Açık' if zorla_modu else 'Kapalı'}")
+    logger.info(f"   Sürüm: {settings.SURUM}")
+    logger.info(f"   Zorla Güncelleme: {'Açık' if zorla_guncelle else 'Kapalı'}")
     logger.info(f"{'='*60}\n")
     
     bot_stats.set("islem_tipi", "Geçmiş Taraması")
@@ -199,14 +221,19 @@ async def gecmis_tarama(zorla_modu: bool = False):
                 if not (dosya_adi_lower.endswith('.pdf') or dosya_adi_lower.endswith('.epub')):
                     continue
                 
+                # 🔴 KRITIK: Korunan mesajları atla
+                if MessageHandler._is_protected(mesaj.id):
+                    logger.debug(f"   🛡️ Korunan mesaj atlanıyor: {mesaj.id}")
+                    continue
+                
                 # Zaten işlenmişse atla (zorla güncelleme yoksa)
-                if not zorla_modu and mesaj.text:
+                if not zorla_guncelle and mesaj.text:
                     if "✍️" in mesaj.text or "Kitap adı:" in mesaj.text or "📖" in mesaj.text:
                         continue
                 
                 # İşle
                 use_filename_only = False
-                if zorla_modu:
+                if zorla_guncelle:
                     text = mesaj.text or ""
                     if "http" not in text:
                         use_filename_only = True
@@ -214,7 +241,7 @@ async def gecmis_tarama(zorla_modu: bool = False):
                 try:
                     await MessageHandler.process_message(
                         mesaj,
-                        zorla_guncelle=zorla_modu,
+                        zorla_guncelle=zorla_guncelle,
                         sadece_dosya_adi=use_filename_only
                     )
                     sayac += 1
@@ -295,7 +322,7 @@ async def main():
     if settings.ADMIN_ID:
         logger.info(f"👑 Admin ID: {settings.ADMIN_ID}")
     else:
-        logger.warning("⚠️  Admin ID ayarlanmamış!")
+        logger.warning("⚠️ Admin ID ayarlanmamış!")
     
     logger.info(f"\n{'='*60}")
     logger.info("🚀 BOT AKTİF!")
@@ -306,7 +333,7 @@ async def main():
         logger.info("⏳ Geçmiş tarama aktif, arka planda başlatılıyor...\n")
         asyncio.create_task(gecmis_tarama(settings.ZORLA_GUNCELLEME_MODU))
     else:
-        logger.info("ℹ️  Geçmiş tarama kapalı\n")
+        logger.info("ℹ️ Geçmiş tarama kapalı\n")
     
     logger.info("👂 Canlı mod aktif. Yeni mesajlar bekleniyor...")
     logger.info("💡 Admin komutları için /admin yazın\n")
@@ -314,6 +341,9 @@ async def main():
     # İlk stats
     logger.info(f"📊 İstatistikler başlatıldı")
     logger.info(f"   Stats dosyası: logs/stats.json\n")
+    
+    # Edit handler'ı kaydet
+    await register_edit_handlers(client)
     
     # Sürekli çalış
     await client.run_until_disconnected()

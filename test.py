@@ -1,34 +1,80 @@
-#!/usr/bin/env python3
-"""search_book() test"""
+from typing import Optional, Dict, Any
+from urllib.parse import quote_plus
+import logging
+import re
+
+from scrapers.base_scraper import BaseScraper
+from parsers.data_parser import DataParser
+from utils.text_utils import metin_duzelt, turkce_baslik, baslik_teknik_temizle, isbn_bul, benzerlik_orani
+from config.constants import veri_kalibi
+import logging
+from typing import Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor
 import asyncio
-from services.book_service import book_service
+import re
 
-async def test():
-    queries = [
-        "Harry Potter",
-        "C_S_Lewis_Narnia_Günlükleri_6_Gümüş_Sandalye.epub",
-        "GIBBERISH_INVALID_QUERY_12345",
-    ]
+from scrapers.kitapyurdu import KitapyurduScraper
+from scrapers.goodreads import GoodreadsScraper
+from scrapers.binkitap import BinKitapScraper
+from utils.async_utils import run_sync
+from utils.text_utils import metin_duzelt, benzerlik_orani
+from utils.series_utils import translate_series_name, prefer_turkish_series
+from config.constants import GURULTU_KELIMELERI
+
+
+logger = logging.getLogger(__name__)
+
+
+def test_search(self, query: str):
+    """Debug arama testi"""
+    print(f"\n🧪 TEST: {query}")
     
-    for query in queries:
-        print(f"\n🔍 Test: {query}")
+    from urllib.parse import quote_plus
+    encoded_query = quote_plus(query)
+    url = f"{self.BASE_URL}/index.php?route=product/search&filter_name={encoded_query}"
+    
+    print(f"URL: {url}\n")
+    
+    try:
+        response = self.session.get(url, timeout=10)
+        print(f"Status: {response.status_code}")
+        print(f"Content Length: {len(response.content)}")
         
-        try:
-            result = await book_service.search_book(query)
-            
-            print(f"   Tip: {type(result)}")
-            print(f"   Değer: {result}")
-            
-            if result is None:
-                print("   ❌ None döndü!")
-            elif isinstance(result, tuple):
-                bilgi, kaynak, basarili = result
-                print(f"   ✅ Tuple: kaynak={kaynak}, basarili={basarili}")
+        # Dosyaya kaydet
+        with open('debug_search.html', 'w', encoding='utf-8') as f:
+            f.write(response.text)
+        
+        print("✅ debug_search.html kaydedildi\n")
+        
+        # Selektörleri test et
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        print("🔍 Selektör Testleri:")
+        selektorler = [
+            '.product-cr',
+            '.product-item',
+            '.book-item',
+            '[data-product-id]',
+            'div.product',
+            'article.product',
+            '.product-card',
+            'li[data-product]',
+            'a[href*="/kitap/"]'
+        ]
+        
+        for sel in selektorler:
+            sonuclar = soup.select(sel)
+            if sonuclar:
+                print(f"✅ {sel}: {len(sonuclar)} sonuç")
+                # İlk sonucun HTML'ini göster
+                print(f"   HTML: {str(sonuclar[0])[:200]}\n")
             else:
-                print(f"   ⚠️ Beklenmeyen tip: {type(result)}")
+                print(f"❌ {sel}: 0 sonuç")
         
-        except Exception as e:
-            print(f"   ❌ Exception: {e}")
+    except Exception as e:
+        print(f"❌ Hata: {e}")
 
-if __name__ == "__main__":
-    asyncio.run(test())
+# test.py'de çalıştır:
+scraper = KitapyurduScraper()
+scraper.test_search("Neksus")

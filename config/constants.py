@@ -98,7 +98,7 @@ UZUN_TUR_ISTISNALARI = [
     "sports romance", "sportsromance", "sustainability", "technology",
     "true adventure", "true crime", "trueadventure", "urban fantasy",
     "urbanfantasy", "vampire romance", "vampireromance", "womens fiction",
-    "womensfiction", "young adult", "youngadult",
+    "womensfiction", "young adult", "youngadult", "TurkishLiterature", "EnglishLiterature", "FranceLiterature", "RussianLiterature", "GermanLiterature", "France", "PolishLiterature", "PolonyaEdebiyatı", "BookClub", "KitapKlübü", "China", "ChineseLiterature", "AsianLiterature", "20thCentury", "ItalianLiterature", "Italy", "ComingOfAge", "Historical", "Algeria", "Adult", "Race", "Japan", "JapanLiterature", "Russia", "Germany", "NobelPrize", "Romania", "AdultFiction", "MiddleEast", "ScandinavianLiterature", "Asia", "Canada", "Indigenous", "WorldWarII", "Turkish", "SciFiFantasy", "Language",
 
     # --- TÜRKÇE KARŞILIKLAR (> 10 Karakter) ---
     "antropoloji", "araştırmacıgazetecilik", "arkeoloji", "astronomi", "aşkvefantastik",
@@ -118,7 +118,7 @@ UZUN_TUR_ISTISNALARI = [
     "sosyaladalet", "sosyalbilimler", "sosyoloji", "sporaşkı", "spiritüellik",
     "sürdürülebilirlik", "tarihselaşk", "tarihselkurgu", "teknoloji",
     "tiyatrooyunları", "uluslararası", "uluslararasıilişkiler", "uzayoperası",
-    "vampiraşkı", "yapayzeka", "yavaşyananaşk", "yemekkitapları", "yiyecekveiçecek"
+    "vampiraşkı", "yapayzeka", "yavaşyananaşk", "yemekkitapları", "yiyecekveiçecek", "TürkEdebiyatı", "İngilizEdebiyatı", "FransızEdebiyatı", "RusEdebiyatı", "AlmanEdebiyatı", "Fransa", "Çin", "ÇinEdebiyatı", "AsyaEdebiyatı", "20nciYüzyıl", "İtalyanEdebiyatı", "İtalya", "YetişkinliğeAdımAtma", "Tarihsel", "Cezayir", "Yetişkin", "Yarış", "Japon", "JaponEdebiyatı", "Rusya", "Almanya", "NobelÖdülü", "Romanya", "YetişkinKurgu", "OrtaDoğu", "İskandinavEdebiyatı", "Asya", "Kanada", "Yerli", "İkinciDünyaSavaşı", "Türkçe", "BilimKurguFantastik", "Dil"
 ]
 
 TUR_CEVIRI = {

@@ -254,11 +254,19 @@ class BookService:
             return None
         
         # ISBN varsa ISBN ile ara
-        if isbn:
+        if isbn and len(str(isbn).strip()) >= 10:
             try:
-                result = await run_sync(scraper.search, isbn)
+                logger.info(f"🔢 ISBN ile direkt arama: {isbn}")
+                
+                # ISBN için özel URL
+                from urllib.parse import quote_plus
+                encoded_isbn = quote_plus(isbn.replace('-', ''))
+                isbn_url = f"https://www.kitapyurdu.com/index.php?route=product/search&filter_isbn={encoded_isbn}"
+                
+                result = await run_sync(scraper.fetch_by_url, isbn_url)
+                
                 if result:
-                    logger.info(f"✅ ISBN ile bulundu: {isbn}")
+                    logger.info(f"✅ ISBN ile bulundu!")
                     return result
             except Exception as e:
                 logger.debug(f"ISBN araması başarısız: {e}")

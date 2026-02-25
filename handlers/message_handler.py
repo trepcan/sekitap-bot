@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 class MessageHandler:
     """Telegram mesaj işleyici"""
     
-    # Geriye dönük uyumluluk için class-level stats
     stats = {
         "toplam_taranan": 0,
         "bulunan": 0,
@@ -41,25 +40,20 @@ class MessageHandler:
         "son_islem_zamani": datetime.now()
     }
     
-    # Cache (son işlenen mesajlar)
     _cache = {}
     _cache_max_size = 100
     
-    # Elle düzenlenen mesajlar (bot tarafından yeniden yazılmayacak)
-    _manual_edits = {}  # {message_id: last_edit_time}
-    _manual_edit_cooldown = 300  # 5 dakika
+    # Elle düzenlenen mesajlar
+    _protected_messages = {}  # {message_id: protection_time}
+    _protection_duration = 600  # 10 dakika
+    
+    # ============================================================
+    # URL EXTRACTION
+    # ============================================================
     
     @staticmethod
     def _extract_url(text: str) -> Optional[str]:
-        """
-        Metinden URL'yi çıkar (Markdown link formatını öncelik verir)
-        
-        Args:
-            text: Mesaj metni
-            
-        Returns:
-            URL string veya None
-        """
+        """Metinden URL'yi çıkar"""
         if not text:
             return None
         
@@ -90,40 +84,90 @@ class MessageHandler:
         
         return None
     
+    # ============================================================
+    # MESSAGE PROTECTION
+    # ============================================================
+    
     @classmethod
-    def _is_manually_edited(cls, message_id: int) -> bool:
+    def _is_protected(cls, message_id: int) -> bool:
         """
-        Mesajın elle düzenlendi mi kontrol et
+        Mesaj korunuyor mu kontrol et
         
         Args:
             message_id: Mesaj ID'si
             
         Returns:
-            True eğer yakın zamanda elle düzenlenmişse
+            True eğer korunuyorsa
         """
-        if message_id not in cls._manual_edits:
+        if message_id not in cls._protected_messages:
             return False
         
-        last_edit = cls._manual_edits[message_id]
-        elapsed = time.time() - last_edit
+        protection_time = cls._protected_messages[message_id]
+        elapsed = time.time() - protection_time
         
-        # Cooldown süresi geçmişse forget et
-        if elapsed > cls._manual_edit_cooldown:
-            del cls._manual_edits[message_id]
+        # Koruma süresi geçmişse kaldır
+        if elapsed > cls._protection_duration:
+            del cls._protected_messages[message_id]
+            logger.info(f"🔓 Koruma kaldırıldı: {message_id}")
             return False
         
+        remaining = cls._protection_duration - elapsed
+        logger.debug(f"🔒 Mesaj korunuyor ({remaining:.0f}s kaldı): {message_id}")
         return True
     
     @classmethod
-    def _mark_manual_edit(cls, message_id: int):
+    def _protect_message(cls, message_id: int):
         """
-        Mesajı elle düzenlendi olarak işaretle
+        Mesajı koru (elle düzenlenmiş olarak işaretle)
         
         Args:
             message_id: Mesaj ID'si
         """
-        cls._manual_edits[message_id] = time.time()
-        logger.info(f"📝 Mesaj elle düzenlendi olarak işaretlendi: {message_id}")
+        cls._protected_messages[message_id] = time.time()
+        logger.info(f"🔒 Mesaj korunuyor (10 dakika): {message_id}")
+        
+        # Cache'ten sil
+        cls._clear_cache_for_message(message_id)
+    
+    # ============================================================
+    # CACHE MANAGEMENT
+    # ============================================================
+    
+    @classmethod
+    def _update_cache(cls, message_id: int, data: dict):
+        """Cache'i güncelle"""
+        if len(cls._cache) >= cls._cache_max_size:
+            oldest_keys = list(cls._cache.keys())[:10]
+            for key in oldest_keys:
+                del cls._cache[key]
+        
+        cls._cache[message_id] = {
+            'data': data,
+            'timestamp': datetime.now()
+        }
+    
+    @classmethod
+    def _get_from_cache(cls, message_id: int) -> Optional[dict]:
+        """Cache'den veri al"""
+        cached = cls._cache.get(message_id)
+        if cached:
+            age = (datetime.now() - cached['timestamp']).total_seconds()
+            if age < 3600:  # 1 saat
+                return cached['data']
+            else:
+                del cls._cache[message_id]
+        return None
+    
+    @classmethod
+    def _clear_cache_for_message(cls, message_id: int):
+        """Belirli bir mesajın cache'ini temizle"""
+        if message_id in cls._cache:
+            del cls._cache[message_id]
+            logger.info(f"🗑️ Cache temizlendi: {message_id}")
+    
+    # ============================================================
+    # MESSAGE VALIDATION
+    # ============================================================
     
     @classmethod
     def _should_skip_message(
@@ -146,79 +190,30 @@ class MessageHandler:
         if not (dosya_adi.endswith('.pdf') or dosya_adi.endswith('.epub')):
             return True, "Desteklenmeyen format"
         
-        # Elle düzenlenen mesajlar güncelleme cooldown süresi içindeyse atla
-        if cls._is_manually_edited(message.id):
-            logger.info(f"⏩ Elle düzenlenen mesaj atlandı (cooldown): {message.id}")
-            return True, "Elle düzenlendi (cooldown)"
+        # 🔴 EN ÖNEMLİ: Korunan mesajlar mutlaka atlanmalı
+        if cls._is_protected(message.id):
+            logger.info(f"🛡️ PROTECTED MESAJ ATLANDIĞI: {message.id}")
+            return True, "🛡️ PROTECTED - DOKUNMA!"
         
-        # Bot imzası kontrolü
-        bot_imzasi = ("Kitap adı:" in text or "✍️" in text or "📖" in text)
+        # Bot imzası var mı
+        bot_imzasi = ("✍️" in text or "📖" in text or "📂 <b>Tür:</b>" in text)
         has_link = "http" in text
         
-        # Zaten işlenmiş ve zorla güncelleme yoksa atla
+        # 🔴 ÖNEMLİ: Link varsa MUTLAKA işle! (protect kaldırılmasın)
+        if has_link:
+            logger.info(f"🔗 Link bulundu, işleniyor: {message.id}")
+            return False, "Link var"
+        
+        # Bot işlemiş ve güncelleme istemiyorsa atla
         if bot_imzasi and not zorla_guncelle:
-            logger.info(f"⏭️ Zaten işlenmiş mesaj atlanıyor (elle düzenlenmiş olabilir)")
-        return True, "Zaten işlenmiş - dokunma!"
+            logger.debug(f"⏭️ Zaten işlenmiş mesaj atlanıyor")
+            return True, "Zaten işlenmiş"
         
         return False, ""
     
     @classmethod
-    def _update_stats(cls, dosya_adi: str, kanal_id: int):
-        """İstatistikleri güncelle"""
-        cls.stats["toplam_taranan"] += 1
-        cls.stats["su_an_islenen"] = dosya_adi
-        cls.stats["aktif_kanal_id"] = kanal_id
-        cls.stats["son_islem_zamani"] = datetime.now()
-        
-        # Global stats
-        bot_stats.increment("toplam_mesaj_islendi")
-    
-    @classmethod
-    def _update_cache(cls, message_id: int, data: dict):
-        """Cache'i güncelle"""
-        # Cache boyutu kontrolü
-        if len(cls._cache) >= cls._cache_max_size:
-            # En eski 10 kaydı sil
-            oldest_keys = list(cls._cache.keys())[:10]
-            for key in oldest_keys:
-                del cls._cache[key]
-        
-        cls._cache[message_id] = {
-            'data': data,
-            'timestamp': datetime.now()
-        }
-    
-    @classmethod
-    def _get_from_cache(cls, message_id: int) -> Optional[dict]:
-        """Cache'den veri al"""
-        cached = cls._cache.get(message_id)
-        if cached:
-            # 1 saatten eski cache'i sil
-            age = (datetime.now() - cached['timestamp']).total_seconds()
-            if age < 3600:  # 1 saat
-                return cached['data']
-            else:
-                del cls._cache[message_id]
-        return None
-    
-    @classmethod
-    def _clear_cache_for_message(cls, message_id: int):
-        """Belirli bir mesajın cache'ini temizle"""
-        if message_id in cls._cache:
-            del cls._cache[message_id]
-            logger.info(f"🗑️ Cache temizlendi: {message_id}")
-    
-    @classmethod
     async def _verify_message_exists(cls, message) -> bool:
-        """
-        Mesajın hala var olup olmadığını kontrol et
-        
-        Args:
-            message: Telethon mesaj objesi
-            
-        Returns:
-            True eğer mesaj varsa, False yoksa
-        """
+        """Mesajın var olup olmadığını kontrol et"""
         try:
             fresh_message = await message.client.get_messages(
                 message.peer_id,
@@ -236,6 +231,23 @@ class MessageHandler:
             logger.error(f"❌ Mesaj doğrulama hatası: {e}")
             return True
     
+    # ============================================================
+    # STATISTICS
+    # ============================================================
+    
+    @classmethod
+    def _update_stats(cls, dosya_adi: str, kanal_id: int):
+        """İstatistikleri güncelle"""
+        cls.stats["toplam_taranan"] += 1
+        cls.stats["su_an_islenen"] = dosya_adi
+        cls.stats["aktif_kanal_id"] = kanal_id
+        cls.stats["son_islem_zamani"] = datetime.now()
+        bot_stats.increment("toplam_mesaj_islendi")
+    
+    # ============================================================
+    # MAIN PROCESSING
+    # ============================================================
+    
     @classmethod
     async def process_message(
         cls, 
@@ -249,12 +261,11 @@ class MessageHandler:
         Args:
             message: Telethon mesaj objesi
             zorla_guncelle: Zaten işlenmiş mesajları da güncelle
-            sadece_dosya_adi: Sadece dosya adından ara (link'i ignore et)
+            sadece_dosya_adi: Sadece dosya adından ara
         """
         start_time = time.time()
         
         try:
-            # Mesaj metnini al
             text = message.raw_text or ""
             
             # Atlanacak mı kontrol et
@@ -263,14 +274,14 @@ class MessageHandler:
             )
             if should_skip:
                 logger.debug(f"⏩ Atlandı: {skip_reason}")
+                # Cache'ten sil
+                cls._clear_cache_for_message(message.id)
                 return
             
-            # İstatistikleri güncelle
             cls._update_stats(message.file.name, message.chat_id)
-            
             logger.info(f"📄 İşleniyor: {message.file.name}")
             
-            # Cache kontrolü (zorla güncelleme değilse)
+            # Cache kontrolü
             cached_data = cls._get_from_cache(message.id) if not zorla_guncelle else None
             if cached_data:
                 logger.info("💾 Cache'den yüklendi")
@@ -324,6 +335,10 @@ class MessageHandler:
             bot_stats.increment("islem_hatalari")
             cls.stats["su_an_islenen"] = "Hata!"
     
+    # ============================================================
+    # BOOK SEARCH
+    # ============================================================
+    
     @classmethod
     async def _search_book_info(
         cls, 
@@ -331,12 +346,7 @@ class MessageHandler:
         text: str, 
         sadece_dosya_adi: bool
     ) -> Tuple[dict, str, bool]:
-        """
-        Kitap bilgilerini ara
-        
-        Returns:
-            (bilgi: dict, kaynak: str, basarili: bool)
-        """
+        """Kitap bilgilerini ara"""
         bilgi = None
         kaynak = None
         basarili = False
@@ -372,7 +382,7 @@ class MessageHandler:
                 if basarili:
                     bot_stats.increment("dosya_adindan_bulunan")
             
-            # 3. Hiçbir şekilde bulunamadı - fallback veri oluştur
+            # 3. Hiçbir şekilde bulunamadı - fallback
             if not basarili or not bilgi:
                 logger.warning(f"❌ Bulunamadı: {message.file.name}")
                 bilgi = cls._create_fallback_data(message.file.name)
@@ -393,15 +403,7 @@ class MessageHandler:
     
     @classmethod
     def _create_fallback_data(cls, dosya_adi: str) -> dict:
-        """
-        Kitap bulunamadığında dosya adından temel bilgiler çıkar
-        
-        Args:
-            dosya_adi: Dosya adı
-            
-        Returns:
-            Temel kitap bilgileri dict
-        """
+        """Kitap bulunamadığında dosya adından temel bilgiler çıkar"""
         temiz_ad = temizle_dosya_adi(dosya_adi)
         parcalar = temiz_ad.split('_', 1)
         
@@ -422,6 +424,10 @@ class MessageHandler:
             "kaynak": "Otomatik (Dosya Adı)"
         }
     
+    # ============================================================
+    # MESSAGE EDITING
+    # ============================================================
+    
     @classmethod
     async def _edit_message_with_retry(
         cls, 
@@ -432,17 +438,7 @@ class MessageHandler:
         durum: str,
         max_retries: int = 3
     ):
-        """
-        Mesajı düzenle (retry logic ile)
-        
-        Args:
-            message: Telethon mesaj objesi
-            bilgi: Kitap bilgileri
-            kaynak: Bilgi kaynağı
-            dosya_turu: PDF veya EPUB
-            durum: Kitap durumu
-            max_retries: Maksimum deneme sayısı
-        """
+        """Mesajı düzenle (retry logic ile)"""
         if not await cls._verify_message_exists(message):
             logger.warning(f"⚠️ Mesaj düzenleme iptal edildi (mesaj yok): {message.id}")
             bot_stats.increment("mesaj_duzenlenemedi")
@@ -512,9 +508,7 @@ class MessageHandler:
         dosya_turu: str,
         durum: str
     ):
-        """
-        Mesajı formatla ve düzenle
-        """
+        """Mesajı formatla ve düzenle"""
         try:
             baslik = html.escape(bilgi.get("baslik") or "Bilinmiyor")
             yazar = html.escape(bilgi.get("yazar") or "Bilinmiyor")
@@ -539,6 +533,10 @@ class MessageHandler:
         except ValueError as e:
             logger.error(f"❌ Format hatası: {e}")
             raise
+    
+    # ============================================================
+    # MESSAGE FORMATTING
+    # ============================================================
     
     @classmethod
     def _format_message_text(
@@ -605,6 +603,10 @@ class MessageHandler:
         
         return metin
     
+    # ============================================================
+    # DATABASE
+    # ============================================================
+    
     @classmethod
     async def _save_to_database(
         cls,
@@ -630,6 +632,10 @@ class MessageHandler:
         except Exception as e:
             logger.error(f"❌ Veritabanı kayıt hatası: {e}", exc_info=True)
             bot_stats.increment("veritabani_hata")
+    
+    # ============================================================
+    # PUBLIC API
+    # ============================================================
     
     @classmethod
     def get_stats(cls) -> dict:

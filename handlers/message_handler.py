@@ -363,7 +363,7 @@ class MessageHandler:
                     bilgi, kaynak, basarili = await book_service.search_book(
                         query="",
                         direct_url=direct_url,
-                        manuel_mod=True
+                        manuel_mod=False
                     )
                     
                     if basarili:

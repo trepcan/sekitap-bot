@@ -13,7 +13,7 @@ GURULTU_KELIMELERI = [
     "bütün eserleri", "toplu eserler", "bls", "pdf", "epub", "okunmadı",
     
     # --- Senin Verdiklerin ve Varyasyonları ---
-    "cs", "[cs]", "-cs", "_cs", "okundu", "okunmadı", "_okundu", "v1", "v2", "v3",
+    "cs", "[cs]", "-cs", "_cs", "okundu", "okunmadı", "_okundu", "v1", "v2", "v3","storytel", "Orj", "orj"
     "pdf", "epub", "mobi", "azw3", "yayınları", "yayınevi", "yayın", "kitabevi", "_ham",
 
     # --- Dijital Arşiv Etiketleri (Release Tags) ---
@@ -98,7 +98,7 @@ UZUN_TUR_ISTISNALARI = [
     "sports romance", "sportsromance", "sustainability", "technology",
     "true adventure", "true crime", "trueadventure", "urban fantasy",
     "urbanfantasy", "vampire romance", "vampireromance", "womens fiction",
-    "womensfiction", "young adult", "youngadult", "TurkishLiterature", "EnglishLiterature", "FranceLiterature", "RussianLiterature", "GermanLiterature", "France", "PolishLiterature", "PolonyaEdebiyatı", "BookClub", "KitapKlübü", "China", "ChineseLiterature", "AsianLiterature", "20thCentury", "ItalianLiterature", "Italy", "ComingOfAge", "Historical", "Algeria", "Adult", "Race", "Japan", "JapanLiterature", "Russia", "Germany", "NobelPrize", "Romania", "AdultFiction", "MiddleEast", "ScandinavianLiterature", "Asia", "Canada", "Indigenous", "WorldWarII", "Turkish", "SciFiFantasy", "Language",
+    "womensfiction", "young adult", "youngadult", "TurkishLiterature", "EnglishLiterature", "FranceLiterature", "RussianLiterature", "GermanLiterature", "France", "PolishLiterature", "PolonyaEdebiyatı", "BookClub", "KitapKlübü", "China", "ChineseLiterature", "AsianLiterature", "20thCentury", "ItalianLiterature", "Italy", "ComingOfAge", "Historical", "Algeria", "Adult", "Race", "Japan", "JapanLiterature", "Russia", "Germany", "NobelPrize", "Romani", "AdultFiction", "MiddleEast", "ScandinavianLiterature", "Asia", "Canada", "Indigenous", "WorldWarII", "Turkish", "SciFiFantasy", "Language",
 
     # --- TÜRKÇE KARŞILIKLAR (> 10 Karakter) ---
     "antropoloji", "araştırmacıgazetecilik", "arkeoloji", "astronomi", "aşkvefantastik",
@@ -290,7 +290,43 @@ TUR_CEVIRI = {
     "Entrepreneurship": "Girişimcilik",
     "Journalism": "Gazetecilik",
     "Reference": "Referans",
-    "True Adventure": "GerçekMacera"
+    "True Adventure": "GerçekMacera",
+    "Space Opera": "UzayOperası",
+  "TurkishLiterature": "TürkEdebiyatı",
+  "EnglishLiterature": "İngilizEdebiyatı",
+  "FrenchLiterature": "FransızEdebiyatı",
+  "RussianLiterature": "RusEdebiyatı",
+  "GermanLiterature": "AlmanEdebiyatı",
+  "France": "Fransa",
+  "PolishLiterature": "PolonyaEdebiyatı",
+  "BookClub": "KitapKlübü",
+  "China": "Çin",
+  "ChineseLiterature": "ÇinEdebiyatı",
+  "AsianLiterature": "AsyaEdebiyatı",
+  "20thCentury": "20nciYüzyıl",
+  "ItalianLiterature": "İtalyanEdebiyatı",
+  "Italy": "İtalya",
+  "ComingOfAge": "YetişkinliğeAdımAtma",
+  "Historical": "Tarihsel",
+  "Algeria": "Cezayir",
+  "Adult": "Yetişkin",
+  "Race": "Yarış",
+  "Japan": "Japonya",
+  "JapaneseLiterature": "JaponEdebiyatı",
+  "Russia": "Rusya",
+  "Germany": "Almanya",
+  "NobelPrize": "NobelÖdülü",
+  "Romani": "Romanya",
+  "AdultFiction": "YetişkinKurgu",
+  "MiddleEast": "OrtaDoğu",
+  "ScandinavianLiterature": "İskandinavEdebiyatı",
+  "Asia": "Asya",
+  "Canada": "Kanada",
+  "Indigenous": "Yerli",
+  "WorldWarII": "İkinciDünyaSavaşı",
+  "Turkish": "Türkçe",
+  "SciFiFantasy": "BilimKurguFantastik",
+  "Language": "Dil"
 }
 
 def veri_kalibi():
